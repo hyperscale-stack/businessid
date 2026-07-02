@@ -41,9 +41,12 @@ func (Provider) Capabilities() businessid.Capabilities {
 	return businessid.Capabilities{Format: true, Checksum: false, Registry: false}
 }
 
-// Canonicalize trims, upper-cases, and strips whitespace.
+// Canonicalize trims, upper-cases, and strips whitespace, dots and dashes.
 func (Provider) Canonicalize(input businessid.IdentifierInput) businessid.IdentifierInput {
-	input.Value = businessid.StripAllSpaces(businessid.TrimUpper(input.Value))
+	input.Value = businessid.StripSeparators(
+		businessid.StripAllSpaces(businessid.TrimUpper(input.Value)),
+		".", "-",
+	)
 	input.CountryCode = businessid.NormalizeCountryCode(input.CountryCode)
 
 	return input
@@ -54,7 +57,6 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindCompanyNumber,
 		Level:          businessid.ValidationLevelFormat,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
 	}

@@ -21,13 +21,14 @@ const (
 	frLen        = 13
 	genericMin   = 4
 	genericMax   = 15
-	sirenLen     = 9
 	prefixLength = 2
 )
 
 const (
 	msgMissingCountryPrefix = "VAT number must start with a 2-letter country code"
 	msgFRVATLayout          = "FR VAT must be FR + 2 key chars + 9-digit SIREN"
+	msgCountryMismatch      = "VAT prefix does not match provided country code"
+	msgEmpty                = "empty value"
 )
 
 // Provider validates VAT numbers.
@@ -45,8 +46,10 @@ func (Provider) Capabilities() businessid.Capabilities {
 }
 
 // Canonicalize trims, upper-cases, and strips whitespace, dots and dashes.
-// When the value does not already begin with a two-letter prefix, the
-// caller-supplied country code (normalized) is prepended.
+// When the value is non-empty and does not already begin with a two-letter
+// prefix, the caller-supplied country code (normalized) is prepended. An
+// empty value is passed through unchanged so downstream callers can surface
+// ReasonEmpty rather than a length error.
 func (Provider) Canonicalize(input businessid.IdentifierInput) businessid.IdentifierInput {
 	value := businessid.StripSeparators(
 		businessid.StripAllSpaces(businessid.TrimUpper(input.Value)),
@@ -55,7 +58,7 @@ func (Provider) Canonicalize(input businessid.IdentifierInput) businessid.Identi
 
 	cc := businessid.NormalizeCountryCode(input.CountryCode)
 
-	if !hasCountryPrefix(value) && cc != "" {
+	if value != "" && !businessid.IsASCIICountryPrefix(value) && cc != "" {
 		value = cc + value
 	}
 
@@ -70,7 +73,6 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindVAT,
 		Level:          businessid.ValidationLevelFormat,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
 	}
@@ -78,12 +80,12 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	if input.Value == "" {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonEmpty
-		res.Message = "empty value"
+		res.Message = msgEmpty
 
 		return res, nil
 	}
 
-	if !hasCountryPrefix(input.Value) {
+	if !businessid.IsASCIICountryPrefix(input.Value) {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonMissingCountryCode
 		res.Message = msgMissingCountryPrefix
@@ -96,7 +98,7 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	if input.CountryCode != "" && input.CountryCode != prefix {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonCountryMismatch
-		res.Message = "VAT prefix does not match provided country code"
+		res.Message = msgCountryMismatch
 		res.CountryCode = prefix
 
 		return res, nil
@@ -107,7 +109,9 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	body := input.Value[prefixLength:]
 
 	if prefix == "FR" {
-		return validateFRFormat(res, body), nil
+		validateFRFormat(res, body)
+
+		return res, nil
 	}
 
 	if len(body) < genericMin-prefixLength || len(body) > genericMax-prefixLength {
@@ -132,13 +136,15 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	return res, nil
 }
 
-func validateFRFormat(res *businessid.ValidationResult, body string) *businessid.ValidationResult {
+// validateFRFormat validates the FR VAT layout on the body (everything after
+// the FR prefix). It mutates res in place.
+func validateFRFormat(res *businessid.ValidationResult, body string) {
 	if len(body) != frLen-prefixLength {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonInvalidLength
 		res.Message = msgFRVATLayout
 
-		return res
+		return
 	}
 
 	key := body[:2]
@@ -149,7 +155,7 @@ func validateFRFormat(res *businessid.ValidationResult, body string) *businessid
 		res.ReasonCode = businessid.ReasonInvalidCharacters
 		res.Message = "FR VAT key must be alphanumeric"
 
-		return res
+		return
 	}
 
 	if !businessid.IsAllDigits(siren) {
@@ -157,13 +163,11 @@ func validateFRFormat(res *businessid.ValidationResult, body string) *businessid
 		res.ReasonCode = businessid.ReasonInvalidCharacters
 		res.Message = "FR VAT SIREN portion must be 9 digits"
 
-		return res
+		return
 	}
 
 	res.Status = businessid.ValidationStatusValid
 	res.ReasonCode = businessid.ReasonOK
-
-	return res
 }
 
 // ValidateChecksum implements [businessid.ChecksumValidator].
@@ -171,12 +175,19 @@ func (Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierI
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindVAT,
 		Level:          businessid.ValidationLevelChecksum,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
 	}
 
-	if !hasCountryPrefix(input.Value) {
+	if input.Value == "" {
+		res.Status = businessid.ValidationStatusInvalid
+		res.ReasonCode = businessid.ReasonEmpty
+		res.Message = msgEmpty
+
+		return res, nil
+	}
+
+	if !businessid.IsASCIICountryPrefix(input.Value) {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonMissingCountryCode
 		res.Message = msgMissingCountryPrefix
@@ -185,6 +196,16 @@ func (Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierI
 	}
 
 	prefix := input.Value[:prefixLength]
+
+	if input.CountryCode != "" && input.CountryCode != prefix {
+		res.Status = businessid.ValidationStatusInvalid
+		res.ReasonCode = businessid.ReasonCountryMismatch
+		res.Message = msgCountryMismatch
+		res.CountryCode = prefix
+
+		return res, nil
+	}
+
 	res.CountryCode = prefix
 
 	body := input.Value[prefixLength:]
@@ -208,18 +229,18 @@ func (Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierI
 	key := body[:2]
 	siren := body[2:]
 
-	if !businessid.IsAllDigits(siren) || !businessid.Luhn(siren) {
-		res.Status = businessid.ValidationStatusInvalid
-		res.ReasonCode = businessid.ReasonInvalidChecksum
-		res.Message = "FR VAT embedded SIREN checksum failed"
-
-		return res, nil
-	}
-
 	if !businessid.IsAllDigits(key) {
 		res.Status = businessid.ValidationStatusUnsupported
 		res.ReasonCode = businessid.ReasonUnsupportedChecksum
 		res.Message = "FR VAT alphanumeric key checksum not supported"
+
+		return res, nil
+	}
+
+	if !businessid.IsAllDigits(siren) || !businessid.Luhn(siren) {
+		res.Status = businessid.ValidationStatusInvalid
+		res.ReasonCode = businessid.ReasonInvalidChecksum
+		res.Message = "FR VAT embedded SIREN checksum failed"
 
 		return res, nil
 	}
@@ -240,14 +261,6 @@ func (Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierI
 	res.ReasonCode = businessid.ReasonOK
 
 	return res, nil
-}
-
-func hasCountryPrefix(s string) bool {
-	if len(s) < 2 {
-		return false
-	}
-
-	return s[0] >= 'A' && s[0] <= 'Z' && s[1] >= 'A' && s[1] <= 'Z'
 }
 
 // parseDigits converts a digit-only string to an int. The caller must ensure

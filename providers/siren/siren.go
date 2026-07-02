@@ -14,7 +14,10 @@ import (
 	"github.com/hyperscale-stack/businessid"
 )
 
-const length = 9
+const (
+	length   = 9
+	msgEmpty = "empty value"
+)
 
 // Provider validates SIREN numbers.
 type Provider struct{}
@@ -47,7 +50,6 @@ func (p Provider) ValidateFormat(_ context.Context, input businessid.IdentifierI
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindSIREN,
 		Level:          businessid.ValidationLevelFormat,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
 	}
@@ -55,7 +57,7 @@ func (p Provider) ValidateFormat(_ context.Context, input businessid.IdentifierI
 	if input.Value == "" {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonEmpty
-		res.Message = "empty value"
+		res.Message = msgEmpty
 
 		return res, nil
 	}
@@ -83,13 +85,20 @@ func (p Provider) ValidateFormat(_ context.Context, input businessid.IdentifierI
 }
 
 // ValidateChecksum implements [businessid.ChecksumValidator].
-func (p Provider) ValidateChecksum(ctx context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+func (p Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindSIREN,
 		Level:          businessid.ValidationLevelChecksum,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
+	}
+
+	if input.Value == "" {
+		res.Status = businessid.ValidationStatusInvalid
+		res.ReasonCode = businessid.ReasonEmpty
+		res.Message = msgEmpty
+
+		return res, nil
 	}
 
 	if !businessid.Luhn(input.Value) {

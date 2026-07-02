@@ -47,7 +47,6 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindEORI,
 		Level:          businessid.ValidationLevelFormat,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
 	}
@@ -68,7 +67,7 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 		return res, nil
 	}
 
-	if !isCountryPrefix(input.Value[:2]) {
+	if !businessid.IsASCIICountryPrefix(input.Value) {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonInvalidFormat
 		res.Message = "EORI must begin with a 2-letter country code"
@@ -88,10 +87,4 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	res.ReasonCode = businessid.ReasonOK
 
 	return res, nil
-}
-
-// isCountryPrefix reports whether the 2-byte slice s is two upper-case
-// ASCII letters. The caller must have already ensured len(s) == 2.
-func isCountryPrefix(s string) bool {
-	return s[0] >= 'A' && s[0] <= 'Z' && s[1] >= 'A' && s[1] <= 'Z'
 }

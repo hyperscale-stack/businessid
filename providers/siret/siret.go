@@ -15,7 +15,10 @@ import (
 	"github.com/hyperscale-stack/businessid"
 )
 
-const length = 14
+const (
+	length   = 14
+	msgEmpty = "empty value"
+)
 
 // Provider validates SIRET numbers.
 type Provider struct{}
@@ -44,7 +47,6 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindSIRET,
 		Level:          businessid.ValidationLevelFormat,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
 	}
@@ -52,7 +54,7 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	if input.Value == "" {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonEmpty
-		res.Message = "empty value"
+		res.Message = msgEmpty
 
 		return res, nil
 	}
@@ -84,9 +86,16 @@ func (Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierI
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindSIRET,
 		Level:          businessid.ValidationLevelChecksum,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
+	}
+
+	if input.Value == "" {
+		res.Status = businessid.ValidationStatusInvalid
+		res.ReasonCode = businessid.ReasonEmpty
+		res.Message = msgEmpty
+
+		return res, nil
 	}
 
 	if !businessid.Luhn(input.Value) {

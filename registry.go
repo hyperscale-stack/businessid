@@ -45,8 +45,10 @@ type RegistryCompanyProfile struct {
 
 // RegistryResult is the outcome of a registry lookup.
 type RegistryResult struct {
+	Kind           IdentifierKind
 	Status         ValidationStatus
 	Profile        *RegistryCompanyProfile
+	InputValue     string
 	CanonicalValue string
 	ReasonCode     string
 	Message        string

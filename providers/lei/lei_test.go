@@ -91,7 +91,7 @@ func TestValidateFormatAndChecksum(t *testing.T) {
 			wantFormatStatus: businessid.ValidationStatusInvalid,
 			wantFormatReason: businessid.ReasonEmpty,
 			wantChecksum:     businessid.ValidationStatusInvalid,
-			wantChecksumCode: businessid.ReasonInvalidChecksum,
+			wantChecksumCode: businessid.ReasonEmpty,
 		},
 		{
 			name:             "too-short",

@@ -41,6 +41,8 @@ func TestValidateFormat(t *testing.T) {
 		{name: "scotland-lower", value: "sc123456", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "ni-prefix", value: "NI654321", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "spaces", value: "  SC 123 456 ", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		{name: "dashes", value: "SC-123-456", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		{name: "dots", value: "12.345.678", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "too-short", value: "1234567", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
 		{name: "unknown-prefix", value: "ZZ123456", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidFormat},
 		{name: "prefix-non-digit-suffix", value: "SC12345X", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},

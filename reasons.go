@@ -14,6 +14,7 @@ const (
 	ReasonInvalidCharacters   = "invalid_characters"
 	ReasonInvalidFormat       = "invalid_format"
 	ReasonInvalidChecksum     = "invalid_checksum"
+	ReasonUnsupportedFormat   = "unsupported_format"
 	ReasonUnsupportedChecksum = "unsupported_checksum"
 	ReasonUnsupportedRegistry = "unsupported_registry"
 	ReasonCountryMismatch     = "country_mismatch"

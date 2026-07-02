@@ -125,3 +125,27 @@ func TestIsAlnumUpper(t *testing.T) {
 	assert.False(t, businessid.IsAlnumUpper("abc"))
 	assert.False(t, businessid.IsAlnumUpper("AB-12"))
 }
+
+func TestIsRegistrationCharset(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, businessid.IsRegistrationCharset(""))
+	assert.True(t, businessid.IsRegistrationCharset("ABC123"))
+	assert.True(t, businessid.IsRegistrationCharset("HAMBURG/B-12345"))
+	assert.True(t, businessid.IsRegistrationCharset("A B.C/D-E"))
+	assert.False(t, businessid.IsRegistrationCharset("abc"))
+	assert.False(t, businessid.IsRegistrationCharset("A_B"))
+	assert.False(t, businessid.IsRegistrationCharset("A*B"))
+}
+
+func TestIsASCIICountryPrefix(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, businessid.IsASCIICountryPrefix(""))
+	assert.False(t, businessid.IsASCIICountryPrefix("F"))
+	assert.True(t, businessid.IsASCIICountryPrefix("FR"))
+	assert.True(t, businessid.IsASCIICountryPrefix("FR12345"))
+	assert.False(t, businessid.IsASCIICountryPrefix("fr"))
+	assert.False(t, businessid.IsASCIICountryPrefix("F1"))
+	assert.False(t, businessid.IsASCIICountryPrefix("1F"))
+}

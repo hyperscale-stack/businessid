@@ -38,6 +38,7 @@ func TestValidateFormat(t *testing.T) {
 	}{
 		{name: "empty-country", value: "ABC123", countryCode: "", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonMissingCountryCode},
 		{name: "empty-value", value: "", countryCode: "BE", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonEmpty},
+		{name: "empty-both", value: "", countryCode: "", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonEmpty},
 		{name: "simple", value: "ABC.123-45", countryCode: "BE", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "lower-canonicalized", value: "abc-123", countryCode: "be", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "too-long", value: strings.Repeat("A", 65), countryCode: "BE", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},

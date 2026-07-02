@@ -54,7 +54,6 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindEUID,
 		Level:          businessid.ValidationLevelFormat,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
 	}
@@ -87,7 +86,7 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 		return res, nil
 	}
 
-	if !isTwoLetterPrefix(prefix[:2]) {
+	if !businessid.IsASCIICountryPrefix(prefix) {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonInvalidFormat
 		res.Message = "EUID must begin with a 2-letter country code"
@@ -111,7 +110,7 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 		return res, nil
 	}
 
-	if !isRegistrationCharset(registration) {
+	if !businessid.IsRegistrationCharset(registration) {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonInvalidCharacters
 		res.Message = "EUID registration segment contains invalid characters"
@@ -123,27 +122,4 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	res.ReasonCode = businessid.ReasonOK
 
 	return res, nil
-}
-
-// isTwoLetterPrefix reports whether the 2-byte slice s is two upper-case
-// ASCII letters. The caller must have already ensured len(s) == 2.
-func isTwoLetterPrefix(s string) bool {
-	return s[0] >= 'A' && s[0] <= 'Z' && s[1] >= 'A' && s[1] <= 'Z'
-}
-
-func isRegistrationCharset(s string) bool {
-	for i := range len(s) {
-		c := s[i]
-
-		switch {
-		case c >= '0' && c <= '9',
-			c >= 'A' && c <= 'Z',
-			c == '.', c == '/', c == '-', c == ' ':
-			continue
-		default:
-			return false
-		}
-	}
-
-	return true
 }

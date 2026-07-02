@@ -46,23 +46,22 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindNationalRegistrationNumber,
 		Level:          businessid.ValidationLevelFormat,
-		InputValue:     input.Value,
 		CanonicalValue: input.Value,
 		CountryCode:    input.CountryCode,
-	}
-
-	if input.CountryCode == "" {
-		res.Status = businessid.ValidationStatusInvalid
-		res.ReasonCode = businessid.ReasonMissingCountryCode
-		res.Message = "country code is required"
-
-		return res, nil
 	}
 
 	if input.Value == "" {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonEmpty
 		res.Message = "empty value"
+
+		return res, nil
+	}
+
+	if input.CountryCode == "" {
+		res.Status = businessid.ValidationStatusInvalid
+		res.ReasonCode = businessid.ReasonMissingCountryCode
+		res.Message = "country code is required"
 
 		return res, nil
 	}
@@ -75,7 +74,7 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 		return res, nil
 	}
 
-	if !isRegistrationCharset(input.Value) {
+	if !businessid.IsRegistrationCharset(input.Value) {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonInvalidCharacters
 		res.Message = "national registration number contains invalid characters"
@@ -87,21 +86,4 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 	res.ReasonCode = businessid.ReasonOK
 
 	return res, nil
-}
-
-func isRegistrationCharset(s string) bool {
-	for i := range len(s) {
-		c := s[i]
-
-		switch {
-		case c >= '0' && c <= '9',
-			c >= 'A' && c <= 'Z',
-			c == '.', c == '/', c == '-', c == ' ':
-			continue
-		default:
-			return false
-		}
-	}
-
-	return true
 }

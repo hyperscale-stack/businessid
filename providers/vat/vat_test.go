@@ -95,10 +95,11 @@ func TestValidateChecksum(t *testing.T) {
 	p := vat.New()
 
 	cases := []struct {
-		name       string
-		value      string
-		wantStatus businessid.ValidationStatus
-		wantReason string
+		name        string
+		value       string
+		countryCode string
+		wantStatus  businessid.ValidationStatus
+		wantReason  string
 	}{
 		{name: "fr-valid-numeric-key", value: "FR44732829320", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "fr-valid-numeric-key-lvmh", value: "FR96552100554", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
@@ -108,13 +109,16 @@ func TestValidateChecksum(t *testing.T) {
 		{name: "non-fr-unsupported", value: "DE123456789", wantStatus: businessid.ValidationStatusUnsupported, wantReason: businessid.ReasonUnsupportedChecksum},
 		{name: "no-prefix-at-all", value: "44732829320", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonMissingCountryCode},
 		{name: "fr-wrong-length-checksum", value: "FR44732829", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
+		{name: "fr-alnum-key-bad-siren-still-unsupported", value: "FRAB732829321", wantStatus: businessid.ValidationStatusUnsupported, wantReason: businessid.ReasonUnsupportedChecksum},
+		{name: "empty-with-country", value: "", countryCode: "FR", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonEmpty},
+		{name: "checksum-country-mismatch", value: "FR96552100554", countryCode: "DE", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonCountryMismatch},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			res, err := p.ValidateChecksum(context.Background(), p.Canonicalize(businessid.IdentifierInput{Value: tc.value}))
+			res, err := p.ValidateChecksum(context.Background(), p.Canonicalize(businessid.IdentifierInput{Value: tc.value, CountryCode: tc.countryCode}))
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantStatus, res.Status)
 			assert.Equal(t, tc.wantReason, res.ReasonCode)

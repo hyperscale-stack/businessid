@@ -92,6 +92,7 @@ func TestValidateChecksum(t *testing.T) {
 	}{
 		{name: "known-valid", value: "73282932000074", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "known-invalid", value: "73282932000075", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidChecksum},
+		{name: "empty", value: "", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonEmpty},
 	}
 
 	for _, tc := range cases {

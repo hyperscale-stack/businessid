@@ -114,3 +114,38 @@ func IsAlnumUpper(s string) bool {
 
 	return true
 }
+
+// IsRegistrationCharset reports whether s is non-empty and contains only
+// characters from the set A-Z, 0-9, dot, slash, dash and space — the
+// character class shared by EUID registration segments and generic
+// national registration numbers.
+func IsRegistrationCharset(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for i := range len(s) {
+		c := s[i]
+
+		switch {
+		case c >= '0' && c <= '9',
+			c >= 'A' && c <= 'Z',
+			c == '.', c == '/', c == '-', c == ' ':
+			continue
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
+// IsASCIICountryPrefix reports whether s begins with two upper-case ASCII
+// letters. Strings shorter than 2 bytes return false.
+func IsASCIICountryPrefix(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+
+	return s[0] >= 'A' && s[0] <= 'Z' && s[1] >= 'A' && s[1] <= 'Z'
+}

@@ -74,6 +74,102 @@ func (errorRegistryProvider) LookupRegistry(context.Context, businessid.Identifi
 	return nil, errBoom
 }
 
+// nilFormatProvider violates the contract by returning (nil, nil).
+type nilFormatProvider struct{ bareProvider }
+
+func (nilFormatProvider) ValidateFormat(context.Context, businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+	return nil, nil //nolint:nilnil // intentional contract violation to exercise defense.
+}
+
+// checksumOnlyProvider implements ChecksumValidator but not FormatValidator.
+type checksumOnlyProvider struct{ bareProvider }
+
+func (checksumOnlyProvider) ValidateChecksum(_ context.Context, in businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+	return &businessid.ValidationResult{
+		Kind:       in.Kind,
+		Level:      businessid.ValidationLevelChecksum,
+		Status:     businessid.ValidationStatusValid,
+		ReasonCode: businessid.ReasonOK,
+	}, nil
+}
+
+// formatOnlyProvider implements FormatValidator but not ChecksumValidator.
+type formatOnlyProvider struct{ bareProvider }
+
+func (formatOnlyProvider) ValidateFormat(_ context.Context, in businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+	return &businessid.ValidationResult{
+		Kind:       in.Kind,
+		Level:      businessid.ValidationLevelFormat,
+		Status:     businessid.ValidationStatusValid,
+		ReasonCode: businessid.ReasonOK,
+	}, nil
+}
+
+// nilChecksumProvider always passes format and returns (nil, nil) from checksum.
+type nilChecksumProvider struct{ bareProvider }
+
+func (nilChecksumProvider) ValidateFormat(_ context.Context, in businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+	return &businessid.ValidationResult{
+		Kind:       in.Kind,
+		Level:      businessid.ValidationLevelFormat,
+		Status:     businessid.ValidationStatusValid,
+		ReasonCode: businessid.ReasonOK,
+	}, nil
+}
+
+func (nilChecksumProvider) ValidateChecksum(context.Context, businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+	return nil, nil //nolint:nilnil // intentional contract violation.
+}
+
+// nilRegistryProvider returns (nil, nil) from LookupRegistry.
+type nilRegistryProvider struct{ bareProvider }
+
+func (nilRegistryProvider) LookupRegistry(context.Context, businessid.IdentifierInput) (*businessid.RegistryResult, error) {
+	return nil, nil //nolint:nilnil // intentional contract violation.
+}
+
+// countingProvider counts Canonicalize + ValidateFormat + ValidateChecksum calls.
+type countingProvider struct {
+	canonCalls    int
+	formatCalls   int
+	checksumCalls int
+}
+
+func (p *countingProvider) Kind() businessid.IdentifierKind { return testKind }
+func (p *countingProvider) Capabilities() businessid.Capabilities {
+	return businessid.Capabilities{Format: true, Checksum: true}
+}
+
+func (p *countingProvider) Canonicalize(in businessid.IdentifierInput) businessid.IdentifierInput {
+	p.canonCalls++
+
+	return in
+}
+
+func (p *countingProvider) ValidateFormat(_ context.Context, in businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+	p.formatCalls++
+
+	return &businessid.ValidationResult{
+		Kind:           in.Kind,
+		Level:          businessid.ValidationLevelFormat,
+		CanonicalValue: in.Value,
+		Status:         businessid.ValidationStatusValid,
+		ReasonCode:     businessid.ReasonOK,
+	}, nil
+}
+
+func (p *countingProvider) ValidateChecksum(_ context.Context, in businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+	p.checksumCalls++
+
+	return &businessid.ValidationResult{
+		Kind:           in.Kind,
+		Level:          businessid.ValidationLevelChecksum,
+		CanonicalValue: in.Value,
+		Status:         businessid.ValidationStatusValid,
+		ReasonCode:     businessid.ReasonOK,
+	}, nil
+}
+
 func TestValidator_UnsupportedKind(t *testing.T) {
 	t.Parallel()
 
@@ -233,7 +329,7 @@ func TestValidator_FormatUnsupportedByProvider(t *testing.T) {
 	res, err := v.ValidateFormat(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "x"})
 	require.NoError(t, err)
 	assert.Equal(t, businessid.ValidationStatusUnsupported, res.Status)
-	assert.Equal(t, businessid.ReasonUnsupportedKind, res.ReasonCode)
+	assert.Equal(t, businessid.ReasonUnsupportedFormat, res.ReasonCode)
 }
 
 func TestValidator_ValidateFormatWrapsProviderError(t *testing.T) {
@@ -330,4 +426,170 @@ func TestDefaultsCoversEveryKind(t *testing.T) {
 		_, ok := v.Provider(k)
 		assert.Truef(t, ok, "kind %q should have a default provider", k)
 	}
+}
+
+func TestValidator_WithProviderTypedNil(t *testing.T) {
+	t.Parallel()
+
+	var typedNil *siren.Provider
+
+	v := businessid.NewValidator(businessid.WithProvider(typedNil))
+
+	_, ok := v.Provider(businessid.IdentifierKindSIREN)
+	assert.False(t, ok)
+}
+
+func TestValidator_WithProvidersTypedNil(t *testing.T) {
+	t.Parallel()
+
+	var typedNil *siren.Provider
+
+	v := businessid.NewValidator(businessid.WithProviders(typedNil, siren.New()))
+
+	_, ok := v.Provider(businessid.IdentifierKindSIREN)
+	assert.True(t, ok)
+}
+
+func TestValidator_NilFormatResultProducesError(t *testing.T) {
+	t.Parallel()
+
+	v := businessid.NewValidator(businessid.WithProvider(nilFormatProvider{}))
+
+	res, err := v.ValidateFormat(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "x"})
+	assert.Nil(t, res)
+	require.Error(t, err)
+}
+
+func TestValidator_ChecksumRequiresFormatValidator(t *testing.T) {
+	t.Parallel()
+
+	v := businessid.NewValidator(businessid.WithProvider(checksumOnlyProvider{}))
+
+	res, err := v.ValidateChecksum(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "x"})
+	require.NoError(t, err)
+	assert.Equal(t, businessid.ValidationStatusUnsupported, res.Status)
+	assert.Equal(t, businessid.ReasonUnsupportedFormat, res.ReasonCode)
+}
+
+func TestValidator_InputValueIsRaw(t *testing.T) {
+	t.Parallel()
+
+	v := defaults.New()
+
+	results, err := v.Validate(context.Background(), businessid.IdentifierInput{
+		Kind:  businessid.IdentifierKindSIREN,
+		Value: "552 100 554",
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "552 100 554", results[0].InputValue, "format result should carry the raw input")
+	assert.Equal(t, "552100554", results[0].CanonicalValue)
+	assert.Equal(t, "552 100 554", results[1].InputValue, "checksum result should carry the raw input too")
+}
+
+func TestValidator_ValidateCanonicalizesOnce(t *testing.T) {
+	t.Parallel()
+
+	p := &countingProvider{}
+	v := businessid.NewValidator(businessid.WithProvider(p))
+
+	_, err := v.Validate(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "x"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, p.canonCalls, "Canonicalize should be called exactly once per Validate()")
+	assert.Equal(t, 1, p.formatCalls, "ValidateFormat should be called exactly once per Validate()")
+	assert.Equal(t, 1, p.checksumCalls, "ValidateChecksum should be called exactly once per Validate()")
+}
+
+func TestValidator_ChecksumNilFormatResultErrors(t *testing.T) {
+	t.Parallel()
+
+	v := businessid.NewValidator(businessid.WithProvider(nilFormatProvider{}))
+
+	res, err := v.ValidateChecksum(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "x"})
+	assert.Nil(t, res)
+	require.Error(t, err)
+}
+
+func TestValidator_ChecksumNilChecksumResultErrors(t *testing.T) {
+	t.Parallel()
+
+	v := businessid.NewValidator(businessid.WithProvider(nilChecksumProvider{}))
+
+	res, err := v.ValidateChecksum(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "x"})
+	assert.Nil(t, res)
+	require.Error(t, err)
+}
+
+func TestValidator_ValidateNilChecksumResultErrors(t *testing.T) {
+	t.Parallel()
+
+	v := businessid.NewValidator(businessid.WithProvider(nilChecksumProvider{}))
+
+	results, err := v.Validate(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "x"})
+	assert.Nil(t, results)
+	require.Error(t, err)
+}
+
+func TestValidator_ValidateChecksumUnsupportedInline(t *testing.T) {
+	t.Parallel()
+
+	v := businessid.NewValidator(businessid.WithProvider(formatOnlyProvider{}))
+
+	results, err := v.Validate(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "x"})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, businessid.ValidationStatusValid, results[0].Status)
+	assert.Equal(t, businessid.ValidationStatusUnsupported, results[1].Status)
+	assert.Equal(t, businessid.ReasonUnsupportedChecksum, results[1].ReasonCode)
+}
+
+func TestValidator_LookupRegistryNilResultErrors(t *testing.T) {
+	t.Parallel()
+
+	v := businessid.NewValidator(businessid.WithProvider(nilRegistryProvider{}))
+
+	res, err := v.LookupRegistry(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "x"})
+	assert.Nil(t, res)
+	require.Error(t, err)
+}
+
+func TestValidator_ValidateUnknownKind(t *testing.T) {
+	t.Parallel()
+
+	v := businessid.NewValidator()
+
+	results, err := v.Validate(context.Background(), businessid.IdentifierInput{
+		Kind:  businessid.IdentifierKindSIREN,
+		Value: "552100554",
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, businessid.ValidationStatusUnsupported, results[0].Status)
+	assert.Equal(t, businessid.ReasonUnsupportedKind, results[0].ReasonCode)
+}
+
+func TestValidator_ValidateChecksumSuccessInjectsRaw(t *testing.T) {
+	t.Parallel()
+
+	v := defaults.New()
+
+	res, err := v.ValidateChecksum(context.Background(), businessid.IdentifierInput{
+		Kind:  businessid.IdentifierKindSIREN,
+		Value: "552 100 554",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, businessid.ValidationStatusValid, res.Status)
+	assert.Equal(t, "552 100 554", res.InputValue)
+	assert.Equal(t, "552100554", res.CanonicalValue)
+}
+
+func TestValidator_LookupRegistrySetsKindAndInputValue(t *testing.T) {
+	t.Parallel()
+
+	v := businessid.NewValidator(businessid.WithProvider(successRegistryProvider{}))
+
+	res, err := v.LookupRegistry(context.Background(), businessid.IdentifierInput{Kind: testKind, Value: "abc"})
+	require.NoError(t, err)
+	assert.Equal(t, testKind, res.Kind)
+	assert.Equal(t, "abc", res.InputValue)
 }
