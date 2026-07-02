@@ -1,0 +1,10 @@
+.DS_Store
+*.out
+
+vendor/
+build/
+
+*.swp
+mock_*
+
+.claude/
