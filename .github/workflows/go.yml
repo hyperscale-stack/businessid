@@ -1,0 +1,57 @@
+name: Go
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build & test (workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+        id: go
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          install-only: true
+
+      # NOTE: `make generate` is intentionally NOT run in CI yet — the
+      # .mockery.yaml is being migrated to v3 syntax while the tool pin
+      # (vektra/mockery v2.53.5) is still v2. Re-enable once the config /
+      # tool are aligned (tracked in LIMITATIONS.md, slated for Phase 4).
+      - name: Build all modules
+        run: make build
+
+      - name: Test all modules (race + coverage)
+        run: make test
+
+      # Lint runs in a dedicated step so that gosec/golangci output is easy to
+      # read. The Makefile iterates over every module with the shared config.
+      - name: Lint all modules
+        run: make lint
+
+      - name: Upload aggregated coverage to Coveralls
+        uses: shogo82148/actions-goveralls@v1
+        with:
+          path-to-profile: build/coverage.out
+
+  finish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Coveralls finished
+        uses: coverallsapp/github-action@master
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          parallel-finished: true
