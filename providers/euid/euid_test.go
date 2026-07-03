@@ -170,6 +170,104 @@ func TestValidateFormatPerCountry(t *testing.T) {
 		{name: "se-invalid-length", value: "SEBR.123456789", wantStatus: businessid.ValidationStatusInvalid},
 		{name: "si-invalid-length", value: "SISRG.123456", wantStatus: businessid.ValidationStatusInvalid},
 		{name: "sk-invalid-length", value: "SKOR.3133353", wantStatus: businessid.ValidationStatusInvalid},
+
+		// Character-class failures per country.
+		{name: "at-invalid-chars", value: "ATFN.12345A_", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "be-invalid-first", value: "BEBCE.2417497106", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "bg-invalid-chars", value: "BGEIK.12345678A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "cz-invalid-chars", value: "CZOR.1234567A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "dk-invalid-chars", value: "DKCVR.6105641A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "ee-invalid-chars", value: "EERIK.1234567A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "es-invalid-chars", value: "ESRMC.A390000!3", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "fi-invalid-chars", value: "FIPRH.0112038A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "hu-invalid-chars", value: "HUCG.01-09-12345A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "ie-invalid-chars", value: "IECRO.12345A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "lu-invalid-chars", value: "LURCSL.B1234A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "mt-invalid-chars", value: "MTMBR.C1234A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "ro-invalid-chars", value: "ROORCT.1418677A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "fixed-digits-non-digit-hr", value: "HRMBS.0800000A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "de-empty-registration", value: "DEHRB.___", wantStatus: businessid.ValidationStatusInvalid},
+
+		// AT invalid chars (digits contain a letter).
+		{name: "at-invalid-mixed", value: "ATFN.12A345B", wantStatus: businessid.ValidationStatusInvalid},
+
+		// DE with only separators (no alphanumeric character).
+		{name: "de-invalid-no-alnum", value: "DEHRB.- -", wantStatus: businessid.ValidationStatusInvalid},
+
+		// ES with non-alnum first byte.
+		{name: "es-invalid-first-slash", value: "ESRMC./12345678", wantStatus: businessid.ValidationStatusInvalid},
+
+		// LU with letters in the digit tail.
+		{name: "lu-invalid-tail", value: "LURCSL.B12A4", wantStatus: businessid.ValidationStatusInvalid},
+
+		// MT with letters in the digit tail.
+		{name: "mt-invalid-tail", value: "MTMBR.C12A4", wantStatus: businessid.ValidationStatusInvalid},
+
+		// Non-EU code with no override → falls through generic BRIS.
+		{name: "xi-no-override", value: "XICH.ANYTHING", wantStatus: businessid.ValidationStatusValid},
+
+		// AT registration too short (1 char) triggers len < 2.
+		{name: "at-invalid-too-short-native", value: "ATFN.A", wantStatus: businessid.ValidationStatusInvalid},
+		// AT registration too long (8 chars) triggers len > 7.
+		{name: "at-invalid-too-long-native", value: "ATFN.12345678", wantStatus: businessid.ValidationStatusInvalid},
+
+		// LU too short.
+		{name: "lu-invalid-too-short", value: "LURCSL.B12", wantStatus: businessid.ValidationStatusInvalid},
+
+		// MT too short.
+		{name: "mt-invalid-too-short", value: "MTMBR.C12", wantStatus: businessid.ValidationStatusInvalid},
+
+		// FR non-digit rejected by SIREN sub-validator.
+		{name: "fr-invalid-non-digit", value: "FRRCS.55210055A", wantStatus: businessid.ValidationStatusInvalid},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			res, err := p.ValidateFormat(context.Background(), p.Canonicalize(businessid.IdentifierInput{Value: tc.value}))
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantStatus, res.Status, "reason=%s message=%s", res.ReasonCode, res.Message)
+		})
+	}
+}
+
+// TestWithCountryValidator verifies the escape hatch for injecting a
+// custom register validator (used for non-EU codes or overrides).
+func TestWithCountryValidator(t *testing.T) {
+	t.Parallel()
+
+	// A custom XI (Northern Ireland) validator that accepts any
+	// registration matching "NI" + 6 digits, without checksum.
+	xiValidator := euid.NewRegisterValidator(
+		nil,
+		func(r string) (bool, string, string) {
+			if len(r) != 8 {
+				return false, businessid.ReasonInvalidLength, "XI reg must be NI + 6 digits"
+			}
+			if r[0] != 'N' || r[1] != 'I' {
+				return false, businessid.ReasonInvalidCharacters, "XI reg must start with NI"
+			}
+			for i := 2; i < 8; i++ {
+				if r[i] < '0' || r[i] > '9' {
+					return false, businessid.ReasonInvalidCharacters, "XI reg tail must be digits"
+				}
+			}
+			return true, businessid.ReasonOK, ""
+		},
+		nil,
+	)
+
+	p := euid.New(euid.WithCountryValidator("XI", xiValidator))
+
+	cases := []struct {
+		name       string
+		value      string
+		wantStatus businessid.ValidationStatus
+	}{
+		{name: "xi-custom-valid", value: "XICH.NI123456", wantStatus: businessid.ValidationStatusValid},
+		{name: "xi-custom-invalid-length", value: "XICH.NI12345", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "xi-custom-invalid-prefix", value: "XICH.XX123456", wantStatus: businessid.ValidationStatusInvalid},
 	}
 
 	for _, tc := range cases {
@@ -247,6 +345,88 @@ func TestValidateChecksumPerCountry(t *testing.T) {
 		// Non-EU code → Unsupported (no native validator).
 		{name: "xi-unsupported", value: "XICH.NI123456", wantStatus: businessid.ValidationStatusUnsupported},
 		{name: "gb-unsupported", value: "GBCH.12345678", wantStatus: businessid.ValidationStatusUnsupported},
+
+		// -- Coverage-driven additions ---------------------------------
+
+		// BG EIK 9-digit valid checksum.
+		{name: "bg-valid-checksum", value: "BGEIK.040808527", wantStatus: businessid.ValidationStatusValid},
+		{name: "bg-invalid-checksum", value: "BGEIK.040808520", wantStatus: businessid.ValidationStatusInvalid},
+
+		// ES DNI (digit prefix) and NIE (X/Y/Z prefix).
+		{name: "es-valid-dni", value: "ESRMC.12345678Z", wantStatus: businessid.ValidationStatusValid},
+		{name: "es-valid-nie", value: "ESRMC.X0000001R", wantStatus: businessid.ValidationStatusValid},
+		{name: "es-invalid-first-char", value: "ESRMC.!12345678", wantStatus: businessid.ValidationStatusInvalid},
+
+		// FI invalid (wrong check).
+		{name: "fi-invalid-checksum", value: "FIPRH.01120380", wantStatus: businessid.ValidationStatusInvalid},
+
+		// EE r==10 alt-weights path (constructed vector where sum1%11==10).
+		// digits 5,5,5,5,5,5,5,X where first-pass sum ≡ 10 mod 11.
+		{name: "ee-alt-path-invalid", value: "EERIK.10000015", wantStatus: businessid.ValidationStatusInvalid},
+
+		// IT invalid Luhn.
+		{name: "it-invalid-luhn", value: "ITRI.07973780010", wantStatus: businessid.ValidationStatusInvalid},
+
+		// SK invalid.
+		{name: "sk-invalid-checksum", value: "SKOR.31333530", wantStatus: businessid.ValidationStatusInvalid},
+
+		// SE invalid.
+		{name: "se-invalid-luhn", value: "SEBR.1234567890", wantStatus: businessid.ValidationStatusInvalid},
+
+		// NL invalid.
+		{name: "nl-invalid-checksum", value: "NLKVK.68750100", wantStatus: businessid.ValidationStatusInvalid},
+
+		// PT invalid.
+		{name: "pt-invalid-checksum", value: "PTRN.504499770", wantStatus: businessid.ValidationStatusInvalid},
+
+		// RO invalid.
+		{name: "ro-invalid-checksum", value: "ROORCT.14186771", wantStatus: businessid.ValidationStatusInvalid},
+
+		// LT invalid.
+		{name: "lt-invalid-checksum", value: "LTJAR.100000005", wantStatus: businessid.ValidationStatusInvalid},
+
+		// LV natural person (first digit ≤ 3).
+		{name: "lv-valid-natural", value: "LVURE.01010120001", wantStatus: businessid.ValidationStatusValid},
+
+		// EE invalid.
+		{name: "ee-invalid-checksum", value: "EERIK.12345670", wantStatus: businessid.ValidationStatusInvalid},
+
+		// EE alt-weights path (sum1 % 11 == 10 triggers alt weights).
+		{name: "ee-valid-alt", value: "EERIK.00000906", wantStatus: businessid.ValidationStatusValid},
+
+		// LT alt-weights path.
+		{name: "lt-valid-alt", value: "LTJAR.110000002", wantStatus: businessid.ValidationStatusValid},
+
+		// BG BULSTAT alt-alt path (both sums mod-11 == 10).
+		{name: "bg-valid-alt-alt", value: "BGEIK.605000000", wantStatus: businessid.ValidationStatusValid},
+
+		// CZ IČO cases r==0 and r==1.
+		{name: "cz-valid-r0", value: "CZOR.00000001", wantStatus: businessid.ValidationStatusValid},
+		{name: "cz-valid-r1", value: "CZOR.00000060", wantStatus: businessid.ValidationStatusValid},
+		{name: "cz-valid-r10", value: "CZOR.00000051", wantStatus: businessid.ValidationStatusValid},
+
+		// SK IČO cases r==0 and r==1 (same algorithm).
+		{name: "sk-valid-r0", value: "SKOR.00000001", wantStatus: businessid.ValidationStatusValid},
+
+		// ES CIF J-type (middle group, digit-only).
+		{name: "es-valid-cif-j", value: "ESRMC.J12345674", wantStatus: businessid.ValidationStatusValid},
+		// ES CIF P-type (letter-only).
+		{name: "es-valid-cif-p", value: "ESRMC.P1234567D", wantStatus: businessid.ValidationStatusValid},
+
+		// FR invalid Luhn (via native SIREN validator).
+		{name: "fr-invalid-checksum", value: "FRRCS.552100550", wantStatus: businessid.ValidationStatusInvalid},
+
+		// DK invalid (first digit 0).
+		{name: "dk-invalid-first-zero", value: "DKCVR.01056416", wantStatus: businessid.ValidationStatusInvalid},
+
+		// NL invalid (r==10 explosion).
+		{name: "nl-invalid-r10", value: "NLKVK.04000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// RO min length (2 digits).
+		{name: "ro-valid-min", value: "ROORCT.19", wantStatus: businessid.ValidationStatusValid},
+
+		// PT S mod 11 < 2 → check == 0.
+		{name: "pt-valid-check-zero", value: "PTRN.000000000", wantStatus: businessid.ValidationStatusValid},
 	}
 
 	for _, tc := range cases {

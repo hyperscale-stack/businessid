@@ -131,3 +131,39 @@ func TestValidateChecksum(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateChecksumWithDerogation exercises the WithDerogation option
+// on the SIREN provider (mirrors the SIRET test).
+func TestValidateChecksumWithDerogation(t *testing.T) {
+	t.Parallel()
+
+	// Fake rule that accepts a SIREN whose digit sum is divisible by 7.
+	divisibleBy7 := func(s string) bool {
+		sum := 0
+		for i := range len(s) {
+			sum += int(s[i] - '0')
+		}
+
+		return sum%7 == 0
+	}
+
+	p := siren.New(siren.WithDerogation("999999999", divisibleBy7))
+
+	// digit sum = 81, not divisible by 7 → rejected by rule.
+	// But Luhn fails too (999999999 has Luhn sum 45 mod 10 = 5).
+	// The rule is only consulted when Luhn fails.
+	res, err := p.ValidateChecksum(
+		context.Background(),
+		p.Canonicalize(businessid.IdentifierInput{Value: "999999999"}),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, businessid.ValidationStatusInvalid, res.Status)
+
+	// Standard SIREN (Luhn valid) is unaffected by the derogation.
+	res2, err := p.ValidateChecksum(
+		context.Background(),
+		p.Canonicalize(businessid.IdentifierInput{Value: "552100554"}),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, businessid.ValidationStatusValid, res2.Status)
+}
