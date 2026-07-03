@@ -758,10 +758,10 @@ func esCIF(body string) bool {
 	case 'P', 'Q', 'R', 'S', 'W':
 		return last == letterCheck
 	default:
-		// Strict rule: for the "either" middle group (C,D,F,G,J,L,M,N,U,V)
-		// domestic entities use digit check. Foreign CIFs (rare) use
-		// letter; callers who need that must use WithSubValidator with
-		// a permissive override.
-		return last == digitCheck
+		// Either group (C, D, F, G, J, L, M, N, U, V): the tax authority
+		// accepts both the digit and the letter check. N-prefix (foreign
+		// entities like ArcelorMittal N0181056C) commonly use the letter
+		// form; domestic C/D/F/G/J/L/M/U/V typically use the digit form.
+		return last == digitCheck || last == letterCheck
 	}
 }

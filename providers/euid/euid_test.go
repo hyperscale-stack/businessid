@@ -357,6 +357,10 @@ func TestValidateChecksumPerCountry(t *testing.T) {
 		{name: "es-valid-nie", value: "ESRMC.X0000001R", wantStatus: businessid.ValidationStatusValid},
 		{name: "es-invalid-first-char", value: "ESRMC.!12345678", wantStatus: businessid.ValidationStatusInvalid},
 
+		// ES CIF N-prefix (foreign entity, letter-check form). ArcelorMittal
+		// Spain N0181056C — sourced from labolsavirtual.com.
+		{name: "es-valid-cif-n-foreign", value: "ESRMC.N0181056C", wantStatus: businessid.ValidationStatusValid},
+
 		// FI invalid (wrong check).
 		{name: "fi-invalid-checksum", value: "FIPRH.01120380", wantStatus: businessid.ValidationStatusInvalid},
 
