@@ -69,11 +69,6 @@ func TestNationalsDefensiveBranches(t *testing.T) {
 		t.Errorf("fiRegisterChecksum r==1 should return false")
 	}
 
-	// nlRegisterChecksum r == 10 branch (7-digit weights version).
-	if nlRegisterChecksum("03000000") {
-		t.Errorf("nlRegisterChecksum r==10 should return false")
-	}
-
 	// lvRegisterChecksum legal check==10 branch.
 	if lvRegisterChecksum("90000000000") {
 		t.Errorf("lvRegisterChecksum legal check==10 should return false")

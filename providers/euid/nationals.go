@@ -53,7 +53,7 @@ func NewRegisterValidator(
 //
 // Non-EU codes (XI, GB, NO, IS, LI) are absent: BRIS does not cover them.
 // Callers who need to validate EUIDs with those prefixes can inject
-// custom validators via [WithSubValidator].
+// custom validators via [WithCountryValidator].
 var euidRegisterValidators = map[string]registerValidator{
 	"AT": {canonicalize: stripSeparators, validateFormat: atRegisterFormat},                                       // Firmenbuchnummer: 1-6 digits + 1 letter
 	"BE": {canonicalize: stripSeparators, validateFormat: beRegisterFormat, validateChecksum: beRegisterChecksum}, // KBO: 10 digits + mod-97
@@ -75,7 +75,7 @@ var euidRegisterValidators = map[string]registerValidator{
 	"LU": {canonicalize: stripSeparators, validateFormat: luRegisterFormat},                                       // RCSL: B + digits
 	"LV": {canonicalize: stripSeparators, validateFormat: lvRegisterFormat, validateChecksum: lvRegisterChecksum}, // 11 digits
 	"MT": {canonicalize: stripSeparators, validateFormat: mtRegisterFormat},                                       // C + digits
-	"NL": {canonicalize: stripSeparators, validateFormat: nlRegisterFormat, validateChecksum: nlRegisterChecksum}, // KVK: 8 digits + mod 11
+	"NL": {canonicalize: stripSeparators, validateFormat: nlRegisterFormat},                                       // KVK: 8 digits (no publicly documented checksum)
 	"PL": {canonicalize: stripSeparators, validateFormat: plRegisterFormat},                                       // KRS: 10 digits
 	"PT": {canonicalize: stripSeparators, validateFormat: ptRegisterFormat, validateChecksum: ptRegisterChecksum}, // NIPC: 9 digits + mod 11
 	"RO": {canonicalize: stripSeparators, validateFormat: roRegisterFormat, validateChecksum: roRegisterChecksum}, // CUI: 2-10 digits + mod 11
@@ -532,28 +532,15 @@ func mtRegisterFormat(r string) (bool, string, string) {
 }
 
 // ----------------------------------------------------------------------
-// NL — KVK-nummer (kvk.nl). 8 digits + weighted mod-11 checksum.
+// NL — KVK-nummer (kvk.nl). 8 digits. The KVK number is a sequential
+// register identifier with no publicly documented checksum algorithm
+// (verified against real KVKs of Philips, ASML, Shell, Unilever,
+// Rabobank, Heineken — none pass a common mod-11 formula), so we keep
+// this register format-only.
 // ----------------------------------------------------------------------
 
 func nlRegisterFormat(r string) (bool, string, string) {
 	return fixedDigitsFormat(r, 8, "NL KVK nummer")
-}
-
-func nlRegisterChecksum(r string) bool {
-	weights := [7]int{8, 7, 6, 5, 4, 3, 2}
-	sum := 0
-
-	for i := range 7 {
-		sum += int(r[i]-'0') * weights[i]
-	}
-
-	m := sum % 11
-	if m == 10 {
-		return false
-	}
-
-	// Some KVK numbers have their check at position 7 = 0 when m == 0.
-	return m == int(r[7]-'0')
 }
 
 // ----------------------------------------------------------------------

@@ -320,7 +320,7 @@ func TestValidateChecksumPerCountry(t *testing.T) {
 
 		{name: "lv-valid-checksum", value: "LVURE.40003032949", wantStatus: businessid.ValidationStatusValid},
 
-		{name: "nl-valid-checksum", value: "NLKVK.68750110", wantStatus: businessid.ValidationStatusValid},
+		{name: "nl-unsupported-checksum", value: "NLKVK.68750110", wantStatus: businessid.ValidationStatusUnsupported},
 
 		{name: "pt-valid-checksum", value: "PTRN.504499777", wantStatus: businessid.ValidationStatusValid},
 
@@ -373,8 +373,9 @@ func TestValidateChecksumPerCountry(t *testing.T) {
 		// SE invalid.
 		{name: "se-invalid-luhn", value: "SEBR.1234567890", wantStatus: businessid.ValidationStatusInvalid},
 
-		// NL invalid.
-		{name: "nl-invalid-checksum", value: "NLKVK.68750100", wantStatus: businessid.ValidationStatusInvalid},
+		// NL has no register-level checksum; both valid and off-by-one values
+		// return Unsupported at Checksum level.
+		{name: "nl-off-by-one-unsupported", value: "NLKVK.68750100", wantStatus: businessid.ValidationStatusUnsupported},
 
 		// PT invalid.
 		{name: "pt-invalid-checksum", value: "PTRN.504499770", wantStatus: businessid.ValidationStatusInvalid},
@@ -418,9 +419,6 @@ func TestValidateChecksumPerCountry(t *testing.T) {
 
 		// DK invalid (first digit 0).
 		{name: "dk-invalid-first-zero", value: "DKCVR.01056416", wantStatus: businessid.ValidationStatusInvalid},
-
-		// NL invalid (r==10 explosion).
-		{name: "nl-invalid-r10", value: "NLKVK.04000000", wantStatus: businessid.ValidationStatusInvalid},
 
 		// RO min length (2 digits).
 		{name: "ro-valid-min", value: "ROORCT.19", wantStatus: businessid.ValidationStatusValid},

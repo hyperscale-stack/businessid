@@ -24,9 +24,9 @@ protobuf, no product-specific dependencies.
 | DUNS                          | `providers/duns`                | ✓      | —                     | —        |
 | EIN                           | `providers/ein`                 | ✓      | —                     | —        |
 | UK Company Number             | `providers/companynumber`       | ✓      | —                     | —        |
-| EUID                          | `providers/euid`                | ✓      | Delegated to sub-validator | — |
+| EUID                          | `providers/euid`                | ✓      | Native EU-27 registers    | —        |
 | EORI                          | `providers/eori`                | ✓      | —                     | —        |
-| VAT                           | `providers/vat`                 | ✓      | 28 countries (EU-27 + XI, GB) | —        |
+| VAT                           | `providers/vat`                 | ✓      | 30 codes (EU-27 + XI, GB, NO, IS kennitala) | —        |
 | National Registration Number  | `providers/nationalregistration`| ✓      | —                     | —        |
 | Defaults wiring               | `defaults`                      | —      | —                     | —        |
 
@@ -129,7 +129,7 @@ the national register's format (and checksum where documented):
 | LU | RCSL | B + 4-6 digits | — |
 | LV | Reģistrācijas numurs | 11 digits | ✓ (mod-11) |
 | MT | Company number | C + 4-6 digits | — |
-| NL | KVK | 8 digits | ✓ (mod-11) |
+| NL | KVK | 8 digits | — |
 | PL | KRS | 10 digits | — |
 | PT | NIPC | 9 digits | ✓ (mod-11) |
 | RO | CUI | 2-10 digits | ✓ (mod-11) |
