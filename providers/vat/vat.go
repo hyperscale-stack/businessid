@@ -32,10 +32,31 @@ const (
 )
 
 // Provider validates VAT numbers.
-type Provider struct{}
+type Provider struct {
+	legacy bool
+}
 
-// New returns a new VAT provider.
-func New() *Provider { return &Provider{} }
+// Option configures a Provider at construction time.
+type Option func(*Provider)
+
+// WithLegacy enables acceptance of historical formats no longer issued but
+// still in use on legacy invoices and databases. Currently:
+//   - IE: accepts '+' and '*' as the position-2 character of the 8-char
+//     legacy Irish VAT layout (digit + [A-Z+*] + 5 digits + letter).
+func WithLegacy() Option {
+	return func(p *Provider) { p.legacy = true }
+}
+
+// New returns a new VAT provider. See [Option] for available options.
+func New(opts ...Option) *Provider {
+	p := &Provider{}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p
+}
 
 // Kind implements [businessid.Provider].
 func (Provider) Kind() businessid.IdentifierKind { return businessid.IdentifierKindVAT }
@@ -58,6 +79,17 @@ func (Provider) Canonicalize(input businessid.IdentifierInput) businessid.Identi
 
 	cc := businessid.NormalizeCountryCode(input.CountryCode)
 
+	// Greece uses "EL" as its VAT prefix (not the ISO code "GR"). Some
+	// non-VIES ERPs and legacy invoicing systems still emit "GR", so treat
+	// it as an alias for "EL" both in the prefix and the CountryCode.
+	if cc == "GR" {
+		cc = "EL"
+	}
+
+	if len(value) >= 2 && value[:2] == "GR" {
+		value = "EL" + value[2:]
+	}
+
 	if value != "" && !businessid.IsASCIICountryPrefix(value) && cc != "" {
 		value = cc + value
 	}
@@ -69,7 +101,7 @@ func (Provider) Canonicalize(input businessid.IdentifierInput) businessid.Identi
 }
 
 // ValidateFormat implements [businessid.FormatValidator].
-func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+func (p Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindVAT,
 		Level:          businessid.ValidationLevelFormat,
@@ -110,6 +142,50 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 
 	if prefix == "FR" {
 		validateFRFormat(res, body)
+
+		return res, nil
+	}
+
+	if prefix == "IE" && p.legacy {
+		valid, reason := matchIEBodyLegacy(body)
+		if !valid {
+			res.Status = businessid.ValidationStatusInvalid
+			res.ReasonCode = reason
+
+			switch reason {
+			case businessid.ReasonInvalidLength:
+				res.Message = "VAT body length does not match IE legacy layout"
+			case businessid.ReasonInvalidCharacters:
+				res.Message = "VAT body characters do not match IE legacy layout"
+			}
+
+			return res, nil
+		}
+
+		res.Status = businessid.ValidationStatusValid
+		res.ReasonCode = businessid.ReasonOK
+
+		return res, nil
+	}
+
+	if spec, ok := vatCountrySpecs[prefix]; ok {
+		valid, reason := spec.format(body)
+		if !valid {
+			res.Status = businessid.ValidationStatusInvalid
+			res.ReasonCode = reason
+
+			switch reason {
+			case businessid.ReasonInvalidLength:
+				res.Message = "VAT body length does not match this country's layout"
+			case businessid.ReasonInvalidCharacters:
+				res.Message = "VAT body characters do not match this country's layout"
+			}
+
+			return res, nil
+		}
+
+		res.Status = businessid.ValidationStatusValid
+		res.ReasonCode = businessid.ReasonOK
 
 		return res, nil
 	}
@@ -211,9 +287,36 @@ func (Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierI
 	body := input.Value[prefixLength:]
 
 	if prefix != "FR" {
-		res.Status = businessid.ValidationStatusUnsupported
-		res.ReasonCode = businessid.ReasonUnsupportedChecksum
-		res.Message = "VAT checksum not implemented for this country"
+		spec, ok := vatCountrySpecs[prefix]
+		if !ok || spec.checksum == nil {
+			res.Status = businessid.ValidationStatusUnsupported
+			res.ReasonCode = businessid.ReasonUnsupportedChecksum
+			res.Message = "VAT checksum not implemented for this country"
+
+			return res, nil
+		}
+
+		// Format must succeed at the country's own rule before checksum is
+		// meaningful. Otherwise a body that fails length/charset would run
+		// into out-of-bounds accesses in the checksum function.
+		if ok, _ := spec.format(body); !ok {
+			res.Status = businessid.ValidationStatusInvalid
+			res.ReasonCode = businessid.ReasonInvalidFormat
+			res.Message = "VAT body layout invalid for checksum"
+
+			return res, nil
+		}
+
+		if !spec.checksum(body) {
+			res.Status = businessid.ValidationStatusInvalid
+			res.ReasonCode = businessid.ReasonInvalidChecksum
+			res.Message = "VAT checksum failed"
+
+			return res, nil
+		}
+
+		res.Status = businessid.ValidationStatusValid
+		res.ReasonCode = businessid.ReasonOK
 
 		return res, nil
 	}

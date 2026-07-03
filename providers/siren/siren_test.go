@@ -65,6 +65,9 @@ func TestValidateFormat(t *testing.T) {
 		{name: "too-short", value: "12345678", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
 		{name: "too-long", value: "1234567890", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
 		{name: "letters", value: "12345678A", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
+		{name: "underscore", value: "12345678_", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
+		{name: "plus-sign", value: "12345678+", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
+		{name: "way-too-long", value: "12345678901234", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
 		{name: "digits-only", value: "552100554", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "leading-zero", value: "000000018", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 	}
@@ -93,9 +96,22 @@ func TestValidateChecksum(t *testing.T) {
 		wantStatus businessid.ValidationStatus
 		wantReason string
 	}{
+		// Well-known Luhn-valid SIRENs sourced from company legal imprints.
+		// All values verified via https://annuaire-entreprises.data.gouv.fr/.
 		{name: "known-valid-danone", value: "732 829 320", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "known-valid-lvmh", value: "552-100-554", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		{name: "known-valid-loreal", value: "632012100", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		{name: "known-valid-totalenergies", value: "542 051 180", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		{name: "known-valid-bnp-paribas", value: "662042449", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		{name: "known-valid-renault", value: "441.639.465", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		{name: "known-valid-michelin", value: "855200507", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		// La Poste. Note the SIREN itself is Luhn-valid; only some La Poste
+		// SIRETs need the divisible-by-5 exception (see providers/siret).
+		{name: "known-valid-la-poste", value: "356000000", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+
 		{name: "known-invalid", value: "732829321", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidChecksum},
+		{name: "known-invalid-lvmh-off-by-one", value: "552100555", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidChecksum},
+		{name: "all-zeros-valid", value: "000000000", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "leading-zero-valid", value: "000000018", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "empty", value: "", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonEmpty},
 	}

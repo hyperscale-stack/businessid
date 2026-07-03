@@ -25,15 +25,21 @@ import (
 )
 
 // Providers returns freshly-constructed instances of every default provider.
+//
+// The EUID provider is wired with the SIREN provider as its national
+// sub-validator for FR so that FR EUIDs are validated end-to-end
+// (BRIS layout + SIREN format + SIREN Luhn).
 func Providers() []businessid.Provider {
+	sirenProvider := siren.New()
+
 	return []businessid.Provider{
-		siren.New(),
+		sirenProvider,
 		siret.New(),
 		lei.New(),
 		duns.New(),
 		ein.New(),
 		companynumber.New(),
-		euid.New(),
+		euid.New(euid.WithSubValidator(sirenProvider)),
 		eori.New(),
 		vat.New(),
 		nationalregistration.New(),
