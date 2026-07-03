@@ -30,6 +30,22 @@ type registerValidator struct {
 	validateChecksum func(registration string) bool
 }
 
+// NewRegisterValidator constructs a register-validator from user-provided
+// functions. Pass nil for any step that should be skipped. This is the
+// public entry point used by [WithCountryValidator] to inject validators
+// for non-EU codes or overrides.
+func NewRegisterValidator(
+	canonicalize func(registration string) string,
+	validateFormat func(registration string) (bool, string, string),
+	validateChecksum func(registration string) bool,
+) registerValidator { //nolint:revive // deliberate: rv is opaque to callers
+	return registerValidator{
+		canonicalize:     canonicalize,
+		validateFormat:   validateFormat,
+		validateChecksum: validateChecksum,
+	}
+}
+
 // euidRegisterValidators binds each EU country to the native rules for
 // its national business register. Sourced from BRIS (Regulation (EU)
 // 2015/884), the national commercial register documentation, and

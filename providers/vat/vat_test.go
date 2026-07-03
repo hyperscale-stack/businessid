@@ -331,6 +331,12 @@ func TestValidateFormatWithLegacy(t *testing.T) {
 		{name: "ie-legacy-star", value: "IE1*23456T", wantStatus: businessid.ValidationStatusValid},
 		{name: "ie-new-still-valid", value: "IE1234567T", wantStatus: businessid.ValidationStatusValid},
 		{name: "ie-invalid-still-rejected", value: "IE1@23456T", wantStatus: businessid.ValidationStatusInvalid},
+		// Legacy 9-char paths (2013+ format also accepted under legacy).
+		{name: "ie-legacy-9char-valid", value: "IE1234567AA", wantStatus: businessid.ValidationStatusValid},
+		{name: "ie-legacy-9char-invalid", value: "IE1+34567AA", wantStatus: businessid.ValidationStatusInvalid},
+		// Length outside 8-9.
+		{name: "ie-legacy-too-short", value: "IE1234T", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "ie-legacy-too-long", value: "IE12345678AAA", wantStatus: businessid.ValidationStatusInvalid},
 	}
 
 	for _, tc := range cases {
@@ -550,6 +556,154 @@ func TestValidateChecksumPerCountry(t *testing.T) {
 
 		// AT — additional verified vector (constructed to pass mod-10).
 		{name: "at-valid-3", value: "ATU30525107", wantStatus: businessid.ValidationStatusValid},
+
+		// -- Coverage-driven additions ---------------------------------
+
+		// ES DNI (starts with digit) and NIE (starts with X/Y/Z).
+		{name: "es-valid-dni", value: "ES12345678Z", wantStatus: businessid.ValidationStatusValid},
+		{name: "es-valid-nie", value: "ESX0000001R", wantStatus: businessid.ValidationStatusValid},
+		{name: "es-invalid-nie", value: "ESX0000001A", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "es-invalid-dni", value: "ES12345678A", wantStatus: businessid.ValidationStatusInvalid},
+		// CIF P-type (letter-only check).
+		{name: "es-valid-cif-p", value: "ESP1234567D", wantStatus: businessid.ValidationStatusValid},
+		{name: "es-cif-unknown-first", value: "ES!12345678", wantStatus: businessid.ValidationStatusInvalid},
+
+		// BG BULSTAT alt-weights path (sum1 % 11 == 10).
+		{name: "bg-valid-bulstat-alt", value: "BG050000009", wantStatus: businessid.ValidationStatusValid},
+		{name: "bg-invalid-foreigner", value: "BG7000000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// GB algo 97 (older format, non-9755).
+		{name: "gb-valid-algo-97", value: "GB123456782", wantStatus: businessid.ValidationStatusValid},
+		// GB 12-digit VAT group (main 9d valid + 3-digit branch).
+		{name: "gb-valid-12d", value: "GB562235987000", wantStatus: businessid.ValidationStatusValid},
+
+		// IE 8-char 7D+1L (Google Ireland already covered).
+		// IE 9-char 7D+2L path.
+		{name: "ie-valid-9char-2l", value: "IE1234567FA", wantStatus: businessid.ValidationStatusValid},
+		{name: "ie-valid-w-suffix", value: "IE1234567TW", wantStatus: businessid.ValidationStatusValid},
+		// IE r==0 → 'W' check character.
+		{name: "ie-valid-w-check", value: "IE0000000W", wantStatus: businessid.ValidationStatusValid},
+		// IE 8-char legacy layout (letter in position 2): checksum not
+		// implemented for that variant, so ValidateChecksum returns invalid.
+		{name: "ie-legacy-8char-no-check", value: "IE1A23456T", wantStatus: businessid.ValidationStatusInvalid},
+		// IE 9-char with mismatching final letter.
+		{name: "ie-invalid-9char-2l", value: "IE1234567FB", wantStatus: businessid.ValidationStatusInvalid},
+
+		// NO check == 0 (r == 0 branch).
+		{name: "no-valid-check-zero", value: "NO450000000", wantStatus: businessid.ValidationStatusValid},
+		// NO r == 1 (invalid).
+		{name: "no-invalid-r1", value: "NO400000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// IS 10-digit kennitala with check==0 and off-by-one invalid.
+		{name: "is-valid-kennitala-zero", value: "IS4500000002", wantStatus: businessid.ValidationStatusValid},
+		{name: "is-invalid-kennitala", value: "IS0102030080", wantStatus: businessid.ValidationStatusInvalid},
+
+		// FI r == 1 case (returns invalid).
+		{name: "fi-invalid-r1", value: "FI80000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// LT alt-weights path.
+		{name: "lt-valid-alt-9d", value: "LT110000002", wantStatus: businessid.ValidationStatusValid},
+
+		// CZ 8-digit variants: r==0, r==1, r==10 branches.
+		{name: "cz-valid-8d-r0", value: "CZ00000001", wantStatus: businessid.ValidationStatusValid},
+		{name: "cz-valid-8d-r1", value: "CZ00000060", wantStatus: businessid.ValidationStatusValid},
+		{name: "cz-valid-8d-r10", value: "CZ00000051", wantStatus: businessid.ValidationStatusValid},
+
+		// CZ 9-digit invalid (off-by-one).
+		{name: "cz-invalid-9d", value: "CZ630000000", wantStatus: businessid.ValidationStatusInvalid},
+		// CZ 9-digit wrong prefix (not '6').
+		{name: "cz-invalid-9d-prefix", value: "CZ500000001", wantStatus: businessid.ValidationStatusInvalid},
+
+		// CZ 10-digit div-11 fails.
+		{name: "cz-invalid-10d-div", value: "CZ8001010007", wantStatus: businessid.ValidationStatusInvalid},
+		// CZ 10-digit div-11 passes but bad date (month 13).
+		{name: "cz-invalid-10d-bad-date", value: "CZ8013010005", wantStatus: businessid.ValidationStatusInvalid},
+
+		// LV natural person off-by-one.
+		{name: "lv-invalid-natural", value: "LV01010120000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// PT S mod 11 < 2 → check = 0 branch.
+		{name: "pt-valid-check-zero", value: "PT000000000", wantStatus: businessid.ValidationStatusValid},
+
+		// SI r == 0 branch (check becomes 11 → 0).
+		{name: "si-valid-check-zero", value: "SI00000000", wantStatus: businessid.ValidationStatusValid},
+
+		// PL invalid (mod-11 == 10).
+		{name: "pl-invalid-mod10", value: "PL0000000000", wantStatus: businessid.ValidationStatusValid},
+
+		// NL invalid (mod-11 == 10).
+		{name: "nl-invalid-mod10", value: "NL000000010B01", wantStatus: businessid.ValidationStatusInvalid},
+
+		// RO minimum length (2 digits, check computed 9 for d0=1).
+		{name: "ro-valid-min", value: "RO19", wantStatus: businessid.ValidationStatusValid},
+
+		// DK first digit = 0 (invalid).
+		{name: "dk-invalid-first-zero", value: "DK00000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// HR off-by-one invalid (ISO 7064).
+		{name: "hr-invalid-checksum", value: "HR27759560624", wantStatus: businessid.ValidationStatusInvalid},
+
+		// IS 10-digit r == 1 (returns false without computing check).
+		{name: "is-invalid-r1", value: "IS4000000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// NL r == 10 (invalid via mod-11 explosion).
+		{name: "nl-invalid-r10", value: "NL040000000B01", wantStatus: businessid.ValidationStatusInvalid},
+
+		// PL r == 10 (invalid via mod-11 explosion).
+		{name: "pl-invalid-r10", value: "PL2000000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// GB 12-digit main invalid checksum.
+		{name: "gb-invalid-12d", value: "GB562235980000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// LV legal entity with r yielding check == 10 (invalid).
+		{name: "lv-invalid-legal-check-10", value: "LV50000000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// CZ 9d bad checksum (r == 0 path with wrong final digit).
+		{name: "cz-invalid-9d-check-0", value: "CZ600000002", wantStatus: businessid.ValidationStatusInvalid},
+
+		// CZ 10d with day = 32 (invalid day).
+		{name: "cz-invalid-10d-day", value: "CZ8001320003", wantStatus: businessid.ValidationStatusInvalid},
+
+		// SI r == 10 branch (invalid).
+		{name: "si-invalid-r10", value: "SI80000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// FI r == 1 fallback path.
+		{name: "fi-r1-explicit", value: "FI89999998", wantStatus: businessid.ValidationStatusInvalid},
+
+		// CY letter mismatch (odd position mapping applied).
+		{name: "cy-invalid-letter-check", value: "CY10000000A", wantStatus: businessid.ValidationStatusInvalid},
+
+		// ES CIF J-type (middle group), digit check under strict rule.
+		{name: "es-valid-cif-j", value: "ESJ12345674", wantStatus: businessid.ValidationStatusValid},
+
+		// ES NIE Y and Z prefixes.
+		{name: "es-valid-nie-y", value: "ESY0000000Z", wantStatus: businessid.ValidationStatusValid},
+		{name: "es-valid-nie-z", value: "ESZ0000000M", wantStatus: businessid.ValidationStatusValid},
+
+		// BG BULSTAT alt-alt path (sum1 and sum2 both mod-11 == 10).
+		{name: "bg-valid-bulstat-alt-alt", value: "BG605000000", wantStatus: businessid.ValidationStatusValid},
+
+		// HR ISO 7064 s==0 → s=10 branch (first digit is 0).
+		{name: "hr-invalid-first-zero", value: "HR00000000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// CZ 9-digit case r==0 → check=1.
+		{name: "cz-valid-9d-r0", value: "CZ600000071", wantStatus: businessid.ValidationStatusValid},
+		// CZ 9-digit case r==1 → check=0.
+		{name: "cz-valid-9d-r1", value: "CZ600000020", wantStatus: businessid.ValidationStatusValid},
+
+		// CZ 10-digit alt month codes (51-62 women 1900s, 21-32 add-2000, 71-82 add-2070).
+		{name: "cz-valid-10d-women", value: "CZ8051010000", wantStatus: businessid.ValidationStatusValid},
+		{name: "cz-valid-10d-2000s", value: "CZ8021010008", wantStatus: businessid.ValidationStatusValid},
+		{name: "cz-valid-10d-add70", value: "CZ8071010002", wantStatus: businessid.ValidationStatusValid},
+
+		// LV legal entity check==10 branch (invalid).
+		{name: "lv-invalid-legal-check-10-real", value: "LV90000000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// SI check==10 → return false.
+		{name: "si-invalid-check-10", value: "SI00000060", wantStatus: businessid.ValidationStatusInvalid},
+
+		// PL r==10 explosion.
+		{name: "pl-invalid-r10-real", value: "PL0200000000", wantStatus: businessid.ValidationStatusInvalid},
 	}
 
 	for _, tc := range cases {
