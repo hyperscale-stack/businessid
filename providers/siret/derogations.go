@@ -15,6 +15,12 @@ const laPosteSIREN = "356000000"
 // Luhn-valid NICs; INSEE granted this exception so that new establishments
 // can continue to be numbered.
 //
+// Économat des Armées (SIREN 542085907, per annuaire-entreprises.data.gouv.fr):
+// this historically-cited dérogatoire entity has a SIREN that in fact
+// passes standard Luhn (verified 2026-07). No special handling is needed;
+// the reference is kept here for future auditors who encounter the same
+// legend.
+//
 // The table is returned as a copy so mutation by callers cannot leak
 // across providers.
 func knownSIRETDerogations() map[string]DerogationRule {

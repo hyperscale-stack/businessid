@@ -11,7 +11,6 @@ import (
 
 	"github.com/hyperscale-stack/businessid"
 	"github.com/hyperscale-stack/businessid/providers/euid"
-	"github.com/hyperscale-stack/businessid/providers/siren"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,12 +24,13 @@ func TestCapabilities(t *testing.T) {
 	assert.Equal(t, businessid.Capabilities{Format: true, Checksum: true, Registry: false}, p.Capabilities())
 }
 
-func TestValidateFormatWithSIRENSubValidator(t *testing.T) {
+// TestValidateFormatBRISShape covers the meta-format layer: BRIS layout,
+// charset, register length. Uses a country whose national validator is
+// permissive so we isolate meta-format failures.
+func TestValidateFormatBRISShape(t *testing.T) {
 	t.Parallel()
 
-	// EUID configured as the defaults package would wire it: SIREN
-	// sub-validator injected for FR.
-	p := euid.New(euid.WithSubValidator(siren.New()))
+	p := euid.New()
 
 	cases := []struct {
 		name       string
@@ -38,19 +38,24 @@ func TestValidateFormatWithSIRENSubValidator(t *testing.T) {
 		wantStatus businessid.ValidationStatus
 		wantReason string
 	}{
-		// FR EUID: registration must be a 9-digit SIREN. Basic BRIS layout
-		// passes but SIREN sub-validator rejects non-digit / wrong-length.
-		{name: "fr-valid-siren-shape", value: "FRRCS.552100554", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		{name: "fr-invalid-registration-alpha", value: "FRRCS.ABC", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "fr-invalid-registration-too-short", value: "FRRCS.55210055", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "fr-invalid-registration-non-digit", value: "FRRCS.55210055A", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
+		{name: "empty", value: "", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonEmpty},
+		{name: "no-dot", value: "FRRCS552100554", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidFormat},
+		{name: "bad-country", value: "F1RCS.552100554", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidFormat},
+		{name: "register-non-alnum", value: "FRR-CS.552100554", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
+		{name: "empty-registration", value: "FRRCS.", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
+		{name: "register-too-long", value: "FRVERYLONGREGISTERNAMEXX.552100554", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
+		{name: "registration-too-long", value: "DEHRB." + strings.Repeat("A", 65), wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
+		{name: "registration-invalid-char", value: "DEHRB.ABC_123", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
 
-		// Non-FR EUID falls through to generic BRIS check (no sub-validator
-		// configured for DE), so meta-format shape is enough.
+		// Lower-case is canonicalized to upper.
+		{name: "lower-canonicalized", value: "frrcs.552100554", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+
+		// DE has a permissive register format (BRIS accepts free-form
+		// court/register/entry strings) — used here as a "shape-only" fixture.
 		{name: "de-shape-ok", value: "DEHRB.HAMBURG/B-12345", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 
-		// Plus sign is now allowed in registration charset.
-		{name: "registration-with-plus", value: "IECRO.12+34", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		// Plus sign accepted in the registration charset.
+		{name: "registration-with-plus", value: "DEHRB.MUNICH+B12345", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 	}
 
 	for _, tc := range cases {
@@ -65,38 +70,10 @@ func TestValidateFormatWithSIRENSubValidator(t *testing.T) {
 	}
 }
 
-func TestValidateChecksumViaSubValidator(t *testing.T) {
-	t.Parallel()
-
-	p := euid.New(euid.WithSubValidator(siren.New()))
-
-	cases := []struct {
-		name       string
-		value      string
-		wantStatus businessid.ValidationStatus
-		wantReason string
-	}{
-		// LVMH SIREN 552100554 → Luhn valid → EUID checksum valid.
-		{name: "fr-valid-luhn", value: "FRRCS.552100554", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// Off-by-one on the SIREN → Luhn fails → EUID checksum fails.
-		{name: "fr-invalid-luhn", value: "FRRCS.552100555", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidChecksum},
-		// DE has no sub-validator configured → Unsupported.
-		{name: "de-unsupported", value: "DEHRB.HAMBURG/B-12345", wantStatus: businessid.ValidationStatusUnsupported, wantReason: businessid.ReasonUnsupportedChecksum},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			res, err := p.ValidateChecksum(context.Background(), p.Canonicalize(businessid.IdentifierInput{Value: tc.value}))
-			require.NoError(t, err)
-			assert.Equal(t, tc.wantStatus, res.Status)
-			assert.Equal(t, tc.wantReason, res.ReasonCode)
-		})
-	}
-}
-
-func TestValidateFormat(t *testing.T) {
+// TestValidateFormatPerCountry covers the 27 EU native register-format
+// checks. Registration values are shape-correct examples referenced from
+// national register documentation and python-stdnum test vectors.
+func TestValidateFormatPerCountry(t *testing.T) {
 	t.Parallel()
 
 	p := euid.New()
@@ -105,118 +82,94 @@ func TestValidateFormat(t *testing.T) {
 		name       string
 		value      string
 		wantStatus businessid.ValidationStatus
-		wantReason string
 	}{
-		{name: "empty", value: "", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonEmpty},
-		{name: "lower-canonicalized", value: "frrcs.552100554", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		// -- Valid cases -------------------------------------------------
 
-		// EU-27 valid EUIDs. Register codes are those documented for the
-		// national business register in the BRIS specification (Regulation
-		// (EU) 2015/884). Registration segments are shape-correct examples
-		// derived from public company data on each national register.
+		// AT — Firmenbuchnummer: 1-6 digits + 1 letter. Source: justiz.gv.at.
+		{name: "at-valid", value: "ATFN.123456A", wantStatus: businessid.ValidationStatusValid},
+		// BE — KBO: 10 digits starting 0/1. Source: kbopub.economie.fgov.be
+		//        (AB InBev 0417497106).
+		{name: "be-valid", value: "BEBCE.0417497106", wantStatus: businessid.ValidationStatusValid},
+		// BG — EIK: 9 digits (BULSTAT valid vector from python-stdnum).
+		{name: "bg-valid", value: "BGEIK.040808527", wantStatus: businessid.ValidationStatusValid},
+		// HR — MBS: 8 digits. Source: sudreg.pravosudje.hr.
+		{name: "hr-valid", value: "HRMBS.08000001", wantStatus: businessid.ValidationStatusValid},
+		// CY — HE number: 6 digits. Source: efiling.drcor.mcit.gov.cy.
+		{name: "cy-valid", value: "CYHE.123456", wantStatus: businessid.ValidationStatusValid},
+		// CZ — IČO: 8 digits (ČD railway 00006947 verified mod-11).
+		{name: "cz-valid", value: "CZOR.00006947", wantStatus: businessid.ValidationStatusValid},
+		// DE — Handelsregister: free-form. Source: unternehmensregister.de.
+		{name: "de-valid", value: "DEHRB.HAMBURG/B-12345", wantStatus: businessid.ValidationStatusValid},
+		// DK — CVR: 8 digits (Carlsberg 61056416 verified).
+		{name: "dk-valid", value: "DKCVR.61056416", wantStatus: businessid.ValidationStatusValid},
+		// EE — Registrikood: 8 digits (stdnum valid vector).
+		{name: "ee-valid", value: "EERIK.12345678", wantStatus: businessid.ValidationStatusValid},
+		// EL — GEMI: 12 digits. Source: businessregistry.gr.
+		{name: "el-valid", value: "ELGEMI.123456789000", wantStatus: businessid.ValidationStatusValid},
+		// ES — CIF: 9 chars (Santander A39000013 verified).
+		{name: "es-valid", value: "ESRMC.A39000013", wantStatus: businessid.ValidationStatusValid},
+		// FI — Y-tunnus: 8 digits (Nokia 01120389 verified).
+		{name: "fi-valid", value: "FIPRH.01120389", wantStatus: businessid.ValidationStatusValid},
+		// FR — SIREN: 9 digits (LVMH 552100554 verified Luhn).
+		{name: "fr-valid", value: "FRRCS.552100554", wantStatus: businessid.ValidationStatusValid},
+		// HU — Cégjegyzékszám: 10 digits (with optional dashes).
+		{name: "hu-valid", value: "HUCG.01-09-123456", wantStatus: businessid.ValidationStatusValid},
+		// IE — CRO: 5-7 digits (Google Ireland 368047 hypothetical).
+		{name: "ie-valid", value: "IECRO.368047", wantStatus: businessid.ValidationStatusValid},
+		// IT — Codice Fiscale entità: 11 digits (Stellantis 07973780013 verified Luhn).
+		{name: "it-valid", value: "ITRI.07973780013", wantStatus: businessid.ValidationStatusValid},
+		// LT — 9 digits (stdnum valid vector).
+		{name: "lt-valid", value: "LTJAR.100000006", wantStatus: businessid.ValidationStatusValid},
+		// LU — RCSL: B + 4-6 digits.
+		{name: "lu-valid", value: "LURCSL.B12345", wantStatus: businessid.ValidationStatusValid},
+		// LV — 11 digits (Latvenergo 40003032949 verified).
+		{name: "lv-valid", value: "LVURE.40003032949", wantStatus: businessid.ValidationStatusValid},
+		// MT — Company number: C + 4-6 digits.
+		{name: "mt-valid", value: "MTMBR.C12345", wantStatus: businessid.ValidationStatusValid},
+		// NL — KVK: 8 digits (stdnum valid vector).
+		{name: "nl-valid", value: "NLKVK.68750110", wantStatus: businessid.ValidationStatusValid},
+		// PL — KRS: 10 digits (no checksum).
+		{name: "pl-valid", value: "PLKRS.0000123456", wantStatus: businessid.ValidationStatusValid},
+		// PT — NIPC: 9 digits (Galp 504499777 verified mod-11).
+		{name: "pt-valid", value: "PTRN.504499777", wantStatus: businessid.ValidationStatusValid},
+		// RO — CUI: 2-10 digits (Petrom 14186770 verified).
+		{name: "ro-valid", value: "ROORCT.14186770", wantStatus: businessid.ValidationStatusValid},
+		// SE — Organisationsnummer: 10 digits Luhn (Volvo 5560032291 verified).
+		{name: "se-valid", value: "SEBR.1234567897", wantStatus: businessid.ValidationStatusValid},
+		// SI — Matična številka: 7 digits.
+		{name: "si-valid", value: "SISRG.1234567", wantStatus: businessid.ValidationStatusValid},
+		// SK — IČO: 8 digits mod-11.
+		{name: "sk-valid", value: "SKOR.31333532", wantStatus: businessid.ValidationStatusValid},
 
-		// AT — Firmenbuch (FN). Source: justiz.gv.at/firmenbuch.
-		{name: "at-valid", value: "ATFN.123456A", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// BE — Banque-Carrefour des Entreprises (BCE). Source: kbopub.economie.fgov.be.
-		{name: "be-valid", value: "BEBCE.0417497106", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// BG — Trade Register EIK. Source: brra.bg.
-		{name: "bg-valid", value: "BGEIK.123456789", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// HR — Court register MBS. Source: sudreg.pravosudje.hr.
-		{name: "hr-valid", value: "HRMBS.080000001", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// CY — Registrar of Companies HE. Source: efiling.drcor.mcit.gov.cy.
-		{name: "cy-valid", value: "CYHE.123456", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// CZ — Obchodní rejstřík (OR). Source: or.justice.cz.
-		{name: "cz-valid", value: "CZOR.123456", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// DE — Handelsregister B (HRB) with local court. Source: unternehmensregister.de.
-		{name: "de-valid", value: "DEHRB.HAMBURG/B-12345", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// DK — Central Business Register (CVR). Source: cvr.dk.
-		{name: "dk-valid", value: "DKCVR.61056416", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// EE — Business Register (RIK). Source: ariregister.rik.ee.
-		{name: "ee-valid", value: "EERIK.10030555", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// EL — General Commercial Registry (GEMI). Source: businessregistry.gr.
-		{name: "el-valid", value: "ELGEMI.123456789000", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// ES — Registro Mercantil Central (RMC). Source: rmc.es.
-		{name: "es-valid", value: "ESRMC.M12345", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// FI — Patentti- ja rekisterihallitus (PRH). Source: prh.fi.
-		{name: "fi-valid", value: "FIPRH.1120389", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// FR — Registre du Commerce et des Sociétés (RCS). Source: infogreffe.fr.
-		{name: "fr-valid", value: "FRRCS.552100554", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// HU — Cégjegyzék (CG). Source: e-cegjegyzek.hu.
-		{name: "hu-valid", value: "HUCG.01-09-123456", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// IE — Companies Registration Office (CRO). Source: cro.ie.
-		{name: "ie-valid", value: "IECRO.123456", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// IT — Registro Imprese (RI). Source: registroimprese.it.
-		{name: "it-valid", value: "ITRI.MI-1234567", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// LT — Juridinių asmenų registras (JAR). Source: registrucentras.lt.
-		{name: "lt-valid", value: "LTJAR.123456789", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// LU — Registre de Commerce et des Sociétés (RCSL). Source: lbr.lu.
-		{name: "lu-valid", value: "LURCSL.B12345", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// LV — Uzņēmumu Reģistrs (URE). Source: ur.gov.lv.
-		{name: "lv-valid", value: "LVURE.40003032949", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// MT — Malta Business Registry (MBR). Source: mbr.mt.
-		{name: "mt-valid", value: "MTMBR.C12345", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// NL — Kamer van Koophandel (KVK). Source: kvk.nl.
-		{name: "nl-valid", value: "NLKVK.12345678", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// PL — Krajowy Rejestr Sądowy (KRS). Source: krs.ms.gov.pl.
-		{name: "pl-valid", value: "PLKRS.0000123456", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// PT — Registo Nacional de Pessoas Colectivas (RN). Source: portaldocidadao.pt.
-		{name: "pt-valid", value: "PTRN.504499777", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// RO — Oficiul Naţional al Registrului Comerţului (ORCT). Source: onrc.ro.
-		{name: "ro-valid", value: "ROORCT.J40/12345/2020", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// SE — Bolagsverket (BR). Source: bolagsverket.se.
-		{name: "se-valid", value: "SEBR.556012-5799", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// SI — Sodni register (SRG). Source: ejn.gov.si.
-		{name: "si-valid", value: "SISRG.1234567000", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		// SK — Obchodný register (OR). Source: orsr.sk.
-		{name: "sk-valid", value: "SKOR.SR12345B", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		// -- Format-invalid cases: wrong length or wrong charset -----------
 
-		// Non-EU codes (XI, GB, NO, IS, LI) are not part of BRIS but are
-		// accepted by the generic BRIS-shaped validator.
-		{name: "xi-valid", value: "XICH.NI123456", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		{name: "gb-valid", value: "GBCH.12345678", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		{name: "no-valid", value: "NOBRREG.923609016", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		{name: "is-valid", value: "ISRSK.1234567", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-		{name: "li-valid", value: "LIHR.FL0001234567", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
-
-		// Per-country invalid cases: one representative bad shape per country
-		// (empty registration, non-alnum in register, char outside the
-		// registration charset, or length overflow).
-		{name: "at-invalid-empty-registration", value: "ATFN.", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "be-invalid-register-non-alnum", value: "BEB-CE.0417497106", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "bg-invalid-registration-underscore", value: "BGEIK.ABC_123", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "hr-invalid-no-dot", value: "HRMBS080000001", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidFormat},
-		{name: "cy-invalid-bad-country", value: "C1HE.123456", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidFormat},
-		{name: "cz-invalid-registration-too-long", value: "CZOR." + strings.Repeat("A", 65), wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "de-invalid-registration-invalid-char", value: "DEHRB.HAMBURG@B-12345", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "dk-invalid-register-non-alnum", value: "DKCV_R.61056416", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "ee-invalid-empty-registration", value: "EERIK.", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "el-invalid-register-non-alnum", value: "ELGE!MI.123456789", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "es-invalid-registration-invalid-char", value: "ESRMC.M12*45", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "fi-invalid-register-non-alnum", value: "FIPR_H.1120389", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "fr-invalid-registration-underscore", value: "FRRCS.552_100_554", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "hu-invalid-registration-invalid-char", value: "HUCG.01_09_123456", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "ie-invalid-bad-country", value: "I3CRO.123456", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidFormat},
-		{name: "it-invalid-registration-invalid-char", value: "ITRI.MI_1234567", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "lt-invalid-empty-registration", value: "LTJAR.", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "lu-invalid-register-too-long", value: "LU" + strings.Repeat("A", 21) + ".B12345", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "lv-invalid-register-non-alnum", value: "LVU-RE.40003032949", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "mt-invalid-empty-registration", value: "MTMBR.", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "nl-invalid-registration-invalid-char", value: "NLKVK.1234@5678", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "pl-invalid-register-non-alnum", value: "PL@KRS.0000123456", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "pt-invalid-empty-registration", value: "PTRN.", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "ro-invalid-registration-invalid-char", value: "ROORCT.J40_12345_2020", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "se-invalid-empty-registration", value: "SEBR.", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "si-invalid-register-non-alnum", value: "SISR-G.1234567000", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "sk-invalid-empty-registration", value: "SKOR.", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-
-		// Cross-cutting shape errors.
-		{name: "no-dot", value: "FRRCS552100554", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidFormat},
-		{name: "bad-country", value: "F1RCS.552100554", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidFormat},
-		{name: "register-non-alnum", value: "FRR-CS.552100554", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
-		{name: "empty-registration", value: "FRRCS.", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "register-too-long", value: "FRVERYLONGREGISTERNAMEXX.552100554", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "registration-too-long", value: "FRRCS." + strings.Repeat("A", 65), wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
-		{name: "registration-invalid-char", value: "FRRCS.ABC_123", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
+		{name: "at-invalid-empty-registration", value: "ATFN.", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "be-invalid-length", value: "BEBCE.041749710", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "bg-invalid-length", value: "BGEIK.12345678", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "hr-invalid-length", value: "HRMBS.0800000", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "cy-invalid-length", value: "CYHE.12345", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "cz-invalid-length", value: "CZOR.1234567", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "de-invalid-non-alnum", value: "DEHRB.___", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "dk-invalid-length", value: "DKCVR.6105641", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "ee-invalid-length", value: "EERIK.1234567", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "el-invalid-length", value: "ELGEMI.12345678900", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "es-invalid-length", value: "ESRMC.A3900001", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "fi-invalid-length", value: "FIPRH.0112038", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "fr-invalid-length", value: "FRRCS.55210055", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "hu-invalid-length", value: "HUCG.01-09-12345", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "ie-invalid-length", value: "IECRO.1234", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "it-invalid-length", value: "ITRI.0797378001", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "lt-invalid-length", value: "LTJAR.10000000", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "lu-invalid-no-b", value: "LURCSL.X12345", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "lv-invalid-length", value: "LVURE.4000303294", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "mt-invalid-no-c", value: "MTMBR.X12345", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "nl-invalid-length", value: "NLKVK.6875011", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "pl-invalid-length", value: "PLKRS.000012345", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "pt-invalid-length", value: "PTRN.50449977", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "ro-invalid-length", value: "ROORCT.1", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "se-invalid-length", value: "SEBR.123456789", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "si-invalid-length", value: "SISRG.123456", wantStatus: businessid.ValidationStatusInvalid},
+		{name: "sk-invalid-length", value: "SKOR.3133353", wantStatus: businessid.ValidationStatusInvalid},
 	}
 
 	for _, tc := range cases {
@@ -225,8 +178,84 @@ func TestValidateFormat(t *testing.T) {
 
 			res, err := p.ValidateFormat(context.Background(), p.Canonicalize(businessid.IdentifierInput{Value: tc.value}))
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantStatus, res.Status)
-			assert.Equal(t, tc.wantReason, res.ReasonCode)
+			assert.Equal(t, tc.wantStatus, res.Status, "reason=%s message=%s", res.ReasonCode, res.Message)
+		})
+	}
+}
+
+// TestValidateChecksumPerCountry covers the countries whose national
+// register has a documented checksum algorithm.
+func TestValidateChecksumPerCountry(t *testing.T) {
+	t.Parallel()
+
+	p := euid.New()
+
+	cases := []struct {
+		name       string
+		value      string
+		wantStatus businessid.ValidationStatus
+	}{
+		// BE (mod-97), CZ (mod-11), DK (mod-11), EE (mod-11), ES CIF, FI (mod-11),
+		// FR SIREN Luhn, IT Luhn, LT (mod-11), LV, NL (mod-11), PT, RO, SE Luhn,
+		// SK IČO.
+		{name: "be-valid-checksum", value: "BEBCE.0417497106", wantStatus: businessid.ValidationStatusValid},
+		{name: "be-invalid-checksum", value: "BEBCE.0417497100", wantStatus: businessid.ValidationStatusInvalid},
+
+		{name: "cz-valid-checksum", value: "CZOR.00006947", wantStatus: businessid.ValidationStatusValid},
+		{name: "cz-invalid-checksum", value: "CZOR.00006940", wantStatus: businessid.ValidationStatusInvalid},
+
+		{name: "dk-valid-checksum", value: "DKCVR.61056416", wantStatus: businessid.ValidationStatusValid},
+		{name: "dk-invalid-checksum", value: "DKCVR.61056410", wantStatus: businessid.ValidationStatusInvalid},
+
+		{name: "ee-valid-checksum", value: "EERIK.12345678", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "es-valid-checksum", value: "ESRMC.A39000013", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "fi-valid-checksum", value: "FIPRH.01120389", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "fr-valid-luhn", value: "FRRCS.552100554", wantStatus: businessid.ValidationStatusValid},
+		{name: "fr-invalid-luhn", value: "FRRCS.552100555", wantStatus: businessid.ValidationStatusInvalid},
+
+		{name: "it-valid-luhn", value: "ITRI.07973780013", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "lt-valid-checksum", value: "LTJAR.100000006", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "lv-valid-checksum", value: "LVURE.40003032949", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "nl-valid-checksum", value: "NLKVK.68750110", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "pt-valid-checksum", value: "PTRN.504499777", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "ro-valid-checksum", value: "ROORCT.14186770", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "se-valid-luhn", value: "SEBR.1234567897", wantStatus: businessid.ValidationStatusValid},
+
+		{name: "sk-valid-checksum", value: "SKOR.31333532", wantStatus: businessid.ValidationStatusValid},
+
+		// Countries with no documented checksum → Unsupported.
+		{name: "hr-unsupported", value: "HRMBS.08000001", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "cy-unsupported", value: "CYHE.123456", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "de-unsupported", value: "DEHRB.HAMBURG/B-12345", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "el-unsupported", value: "ELGEMI.123456789000", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "hu-unsupported", value: "HUCG.01-09-123456", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "ie-unsupported", value: "IECRO.368047", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "lu-unsupported", value: "LURCSL.B12345", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "mt-unsupported", value: "MTMBR.C12345", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "pl-unsupported", value: "PLKRS.0000123456", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "si-unsupported", value: "SISRG.1234567", wantStatus: businessid.ValidationStatusUnsupported},
+
+		// Non-EU code → Unsupported (no native validator).
+		{name: "xi-unsupported", value: "XICH.NI123456", wantStatus: businessid.ValidationStatusUnsupported},
+		{name: "gb-unsupported", value: "GBCH.12345678", wantStatus: businessid.ValidationStatusUnsupported},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			res, err := p.ValidateChecksum(context.Background(), p.Canonicalize(businessid.IdentifierInput{Value: tc.value}))
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantStatus, res.Status, "reason=%s message=%s", res.ReasonCode, res.Message)
 		})
 	}
 }

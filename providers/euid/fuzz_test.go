@@ -10,7 +10,6 @@ import (
 
 	"github.com/hyperscale-stack/businessid"
 	"github.com/hyperscale-stack/businessid/providers/euid"
-	"github.com/hyperscale-stack/businessid/providers/siren"
 )
 
 func FuzzValidateFormat(f *testing.F) {
@@ -23,23 +22,19 @@ func FuzzValidateFormat(f *testing.F) {
 		f.Add(s)
 	}
 
-	// Two providers — one bare, one with SIREN sub-validator wired.
-	pBare := euid.New()
-	pWithSub := euid.New(euid.WithSubValidator(siren.New()))
+	p := euid.New()
 
 	f.Fuzz(func(t *testing.T, s string) {
-		for _, prov := range []*euid.Provider{pBare, pWithSub} {
-			in := prov.Canonicalize(businessid.IdentifierInput{Value: s})
+		in := p.Canonicalize(businessid.IdentifierInput{Value: s})
 
-			res, err := prov.ValidateFormat(context.Background(), in)
-			if err == nil && res == nil {
-				t.Fatalf("ValidateFormat nil result with nil error, input=%q", s)
-			}
+		res, err := p.ValidateFormat(context.Background(), in)
+		if err == nil && res == nil {
+			t.Fatalf("ValidateFormat nil result with nil error, input=%q", s)
+		}
 
-			cres, cerr := prov.ValidateChecksum(context.Background(), in)
-			if cerr == nil && cres == nil {
-				t.Fatalf("ValidateChecksum nil result with nil error, input=%q", s)
-			}
+		cres, cerr := p.ValidateChecksum(context.Background(), in)
+		if cerr == nil && cres == nil {
+			t.Fatalf("ValidateChecksum nil result with nil error, input=%q", s)
 		}
 	})
 }

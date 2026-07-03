@@ -14,14 +14,17 @@
 // [A-Z0-9./\- +].
 //
 // The provider treats the EUID as a meta-format: the country code selects
-// a sub-validator (SIREN for FR, etc.) which validates the REGISTRATION
-// segment against its own national rules. Sub-validators are injected
-// via [WithSubValidator], typically wired by the defaults package.
+// a native national-register validator (see [nationals.go]) which
+// validates the REGISTRATION segment against its own rules (format +
+// checksum where documented). All 27 EU-27 registers are covered
+// natively — no external wiring is required.
+//
+// For countries outside BRIS (XI, GB, NO, IS, LI) or for a custom
+// override, [WithCountryValidator] injects a caller-provided validator.
 package euid
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/hyperscale-stack/businessid"
@@ -36,31 +39,28 @@ const (
 // Option configures a Provider at construction time.
 type Option func(*Provider)
 
-// WithSubValidator registers a national sub-validator. The provider's
-// [businessid.IdentifierKind] is used as the lookup key; the EUID validator
-// consults the country → kind table in [euidCountryConfigs] to route a
-// given EUID to the right sub-validator. Multiple calls compose; the last
-// one wins for a given kind.
-func WithSubValidator(sub businessid.Provider) Option {
+// WithCountryValidator registers a custom register-validator for a
+// 2-letter country code. This overrides the native validator (if any)
+// for that country, and is the extension point for non-EU codes.
+// Multiple calls compose; the last one wins for a given code.
+func WithCountryValidator(cc string, rv registerValidator) Option {
 	return func(p *Provider) {
-		if p.subValidators == nil {
-			p.subValidators = map[businessid.IdentifierKind]businessid.Provider{}
+		if p.overrides == nil {
+			p.overrides = map[string]registerValidator{}
 		}
 
-		p.subValidators[sub.Kind()] = sub
+		p.overrides[strings.ToUpper(cc)] = rv
 	}
 }
 
 // Provider validates EUID codes.
 type Provider struct {
-	subValidators map[businessid.IdentifierKind]businessid.Provider
+	overrides map[string]registerValidator
 }
 
 // New returns a new EUID provider. See [Option] for available options.
 func New(opts ...Option) *Provider {
-	p := &Provider{
-		subValidators: map[businessid.IdentifierKind]businessid.Provider{},
-	}
+	p := &Provider{}
 
 	for _, opt := range opts {
 		opt(p)
@@ -72,15 +72,13 @@ func New(opts ...Option) *Provider {
 // Kind implements [businessid.Provider].
 func (Provider) Kind() businessid.IdentifierKind { return businessid.IdentifierKindEUID }
 
-// Capabilities implements [businessid.Provider]. Checksum reflects the
-// ability to delegate to a national sub-validator; it is true even when
-// no sub-validator is registered because the interface method exists.
+// Capabilities implements [businessid.Provider].
 func (Provider) Capabilities() businessid.Capabilities {
 	return businessid.Capabilities{Format: true, Checksum: true, Registry: false}
 }
 
-// Canonicalize trims and upper-cases. It preserves inner spaces, dots and
-// dashes because they can appear inside the registration segment.
+// Canonicalize trims and upper-cases. It preserves inner spaces, dots
+// and dashes because they can appear inside the registration segment.
 func (Provider) Canonicalize(input businessid.IdentifierInput) businessid.IdentifierInput {
 	input.Value = businessid.TrimUpper(input.Value)
 	input.CountryCode = businessid.NormalizeCountryCode(input.CountryCode)
@@ -95,10 +93,8 @@ type parsedEUID struct {
 	registration string // segment after the '.'
 }
 
-// parse validates the basic BRIS layout and returns the segments. It
-// returns a non-nil error result if the value is malformed at the meta-
-// format level (no dot, bad country code, bad register/registration
-// length or charset). The reason code is set on res.
+// parse validates the basic BRIS layout and returns the segments. On
+// failure it sets the reason on res and returns ok = false.
 func parse(value string, res *businessid.ValidationResult) (parsedEUID, bool) {
 	dot := strings.IndexByte(value, '.')
 	if dot < 3 {
@@ -161,14 +157,25 @@ func parse(value string, res *businessid.ValidationResult) (parsedEUID, bool) {
 	}, true
 }
 
+// lookup resolves the register-validator for a country code, giving
+// caller-supplied overrides priority over the native table.
+func (p Provider) lookup(cc string) (registerValidator, bool) {
+	if rv, ok := p.overrides[cc]; ok {
+		return rv, true
+	}
+
+	rv, ok := euidRegisterValidators[cc]
+
+	return rv, ok
+}
+
 // ValidateFormat implements [businessid.FormatValidator].
 //
-// After the meta-format layout is checked, if a sub-validator is
-// registered for the country's configured kind, the REGISTRATION segment
-// is delegated to it. This produces stronger format validation than the
-// generic charset check (e.g. FR requires the segment to be a valid
-// SIREN — 9 digits — instead of any alnum string).
-func (p Provider) ValidateFormat(ctx context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+// After the BRIS layout is checked, the country's native validator
+// (or an override registered via [WithCountryValidator]) validates the
+// REGISTRATION segment. If no validator exists for the country, only
+// the generic BRIS charset check applies.
+func (p Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindEUID,
 		Level:          businessid.ValidationLevelFormat,
@@ -191,47 +198,24 @@ func (p Provider) ValidateFormat(ctx context.Context, input businessid.Identifie
 
 	res.CountryCode = parsed.countryCode
 
-	cfg, hasCfg := euidCountryConfigs[parsed.countryCode]
-	if hasCfg && cfg.subValidatorKind != "" {
-		if sub, ok := p.subValidators[cfg.subValidatorKind]; ok {
-			return p.delegateFormat(ctx, res, sub, parsed)
-		}
-	}
-
-	res.Status = businessid.ValidationStatusValid
-	res.ReasonCode = businessid.ReasonOK
-
-	return res, nil
-}
-
-// delegateFormat runs the sub-provider's canonicalization and format check
-// on the REGISTRATION segment and merges the outcome into res. Format
-// failures propagate their reason code so callers can distinguish
-// "invalid SIREN length" from "invalid EUID layout".
-func (p Provider) delegateFormat(ctx context.Context, res *businessid.ValidationResult, sub businessid.Provider, parsed parsedEUID) (*businessid.ValidationResult, error) {
-	fv, ok := sub.(businessid.FormatValidator)
-	if !ok {
+	rv, hasRV := p.lookup(parsed.countryCode)
+	if !hasRV || rv.validateFormat == nil {
 		res.Status = businessid.ValidationStatusValid
 		res.ReasonCode = businessid.ReasonOK
 
 		return res, nil
 	}
 
-	subInput := sub.Canonicalize(businessid.IdentifierInput{
-		Kind:        sub.Kind(),
-		Value:       parsed.registration,
-		CountryCode: parsed.countryCode,
-	})
-
-	subRes, err := fv.ValidateFormat(ctx, subInput)
-	if err != nil {
-		return nil, fmt.Errorf("euid sub-validator %s format: %w", sub.Kind(), err)
+	registration := parsed.registration
+	if rv.canonicalize != nil {
+		registration = rv.canonicalize(registration)
 	}
 
-	if subRes.Status != businessid.ValidationStatusValid {
-		res.Status = subRes.Status
-		res.ReasonCode = subRes.ReasonCode
-		res.Message = "EUID registration failed " + string(sub.Kind()) + " format: " + subRes.Message
+	valid, reason, msg := rv.validateFormat(registration)
+	if !valid {
+		res.Status = businessid.ValidationStatusInvalid
+		res.ReasonCode = reason
+		res.Message = "EUID registration invalid: " + msg
 
 		return res, nil
 	}
@@ -242,10 +226,11 @@ func (p Provider) delegateFormat(ctx context.Context, res *businessid.Validation
 	return res, nil
 }
 
-// ValidateChecksum implements [businessid.ChecksumValidator]. It delegates
-// to the country-configured sub-validator. Countries without a registered
-// sub-validator report [businessid.ValidationStatusUnsupported].
-func (p Provider) ValidateChecksum(ctx context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+// ValidateChecksum implements [businessid.ChecksumValidator]. It runs
+// the country's native checksum on the REGISTRATION segment. Countries
+// whose national register has no publicly documented checksum report
+// [businessid.ValidationStatusUnsupported].
+func (p Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindEUID,
 		Level:          businessid.ValidationLevelChecksum,
@@ -268,50 +253,43 @@ func (p Provider) ValidateChecksum(ctx context.Context, input businessid.Identif
 
 	res.CountryCode = parsed.countryCode
 
-	cfg, hasCfg := euidCountryConfigs[parsed.countryCode]
-	if !hasCfg || cfg.subValidatorKind == "" {
+	rv, hasRV := p.lookup(parsed.countryCode)
+	if !hasRV || rv.validateChecksum == nil {
 		res.Status = businessid.ValidationStatusUnsupported
 		res.ReasonCode = businessid.ReasonUnsupportedChecksum
-		res.Message = "EUID checksum not implemented for this country"
+		res.Message = "EUID checksum not implemented for this country's register"
 
 		return res, nil
 	}
 
-	sub, ok := p.subValidators[cfg.subValidatorKind]
-	if !ok {
-		res.Status = businessid.ValidationStatusUnsupported
-		res.ReasonCode = businessid.ReasonUnsupportedChecksum
-		res.Message = "EUID sub-validator not registered for kind " + string(cfg.subValidatorKind)
+	registration := parsed.registration
+	if rv.canonicalize != nil {
+		registration = rv.canonicalize(registration)
+	}
+
+	// A checksum is only meaningful when the format was already OK — we
+	// re-run the format check to avoid handing malformed input to the
+	// checksum function (which trusts positional invariants).
+	if rv.validateFormat != nil {
+		if valid, reason, msg := rv.validateFormat(registration); !valid {
+			res.Status = businessid.ValidationStatusInvalid
+			res.ReasonCode = reason
+			res.Message = "EUID registration invalid: " + msg
+
+			return res, nil
+		}
+	}
+
+	if !rv.validateChecksum(registration) {
+		res.Status = businessid.ValidationStatusInvalid
+		res.ReasonCode = businessid.ReasonInvalidChecksum
+		res.Message = "EUID registration checksum failed"
 
 		return res, nil
 	}
 
-	cv, ok := sub.(businessid.ChecksumValidator)
-	if !ok {
-		res.Status = businessid.ValidationStatusUnsupported
-		res.ReasonCode = businessid.ReasonUnsupportedChecksum
-		res.Message = "EUID sub-validator does not support checksum"
-
-		return res, nil
-	}
-
-	subInput := sub.Canonicalize(businessid.IdentifierInput{
-		Kind:        sub.Kind(),
-		Value:       parsed.registration,
-		CountryCode: parsed.countryCode,
-	})
-
-	subRes, err := cv.ValidateChecksum(ctx, subInput)
-	if err != nil {
-		return nil, fmt.Errorf("euid sub-validator %s checksum: %w", sub.Kind(), err)
-	}
-
-	res.Status = subRes.Status
-	res.ReasonCode = subRes.ReasonCode
-
-	if subRes.Message != "" {
-		res.Message = "EUID registration " + string(sub.Kind()) + " checksum: " + subRes.Message
-	}
+	res.Status = businessid.ValidationStatusValid
+	res.ReasonCode = businessid.ReasonOK
 
 	return res, nil
 }

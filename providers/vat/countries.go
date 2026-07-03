@@ -72,8 +72,8 @@ var vatCountrySpecs = map[string]countrySpec{
 	"SK": {format: matchSKBody, checksum: checksumSKBody},
 	"GB": {format: matchGBBody, checksum: checksumGBBody},
 	"XI": {format: matchGBBody, checksum: checksumGBBody},
-	"NO": {format: matchNOBody},
-	"IS": {format: matchISBody},
+	"NO": {format: matchNOBody, checksum: checksumNOBody},
+	"IS": {format: matchISBody, checksum: checksumISBody},
 	"LI": {format: matchLIBody},
 }
 
@@ -150,7 +150,10 @@ func matchBGBody(body string) (bool, string) { return matchDigitsInSet(body, 9, 
 // HR: 11 digits (OIB).
 func matchHRBody(body string) (bool, string) { return matchFixedDigits(body, 11) }
 
-// CY: 8 digits + 1 upper-case letter.
+// CY: 8 digits + 1 upper-case letter. Cyprus reserves the prefix "12"
+// for legacy TINs (natural person identifiers) which are not VAT
+// numbers; those inputs are rejected as invalid format.
+// Source: Cyprus Tax Department (mof.gov.cy).
 func matchCYBody(body string) (bool, string) {
 	if len(body) != 9 {
 		return false, businessid.ReasonInvalidLength
@@ -158,6 +161,10 @@ func matchCYBody(body string) (bool, string) {
 
 	if !businessid.IsAllDigits(body[:8]) || !isUpperLetter(body[8]) {
 		return false, businessid.ReasonInvalidCharacters
+	}
+
+	if body[0] == '1' && body[1] == '2' {
+		return false, businessid.ReasonInvalidFormat
 	}
 
 	return true, ""
@@ -313,8 +320,20 @@ func matchGBBody(body string) (bool, string) { return matchDigitsInSet(body, 9, 
 // suffix must be stripped by the caller.
 func matchNOBody(body string) (bool, string) { return matchFixedDigits(body, 9) }
 
-// IS: 5 or 6 digits.
-func matchISBody(body string) (bool, string) { return matchDigitsRange(body, 5, 6) }
+// IS: 5 or 6 digits (VSK) or 10 digits (kennitala). Kennitala VATs get
+// checksum validation; VSK stays format-only.
+func matchISBody(body string) (bool, string) {
+	switch len(body) {
+	case 5, 6, 10:
+		if !businessid.IsAllDigits(body) {
+			return false, businessid.ReasonInvalidCharacters
+		}
+
+		return true, ""
+	}
+
+	return false, businessid.ReasonInvalidLength
+}
 
 // LI: 5 digits (Liechtenstein internal enterprise number).
 func matchLIBody(body string) (bool, string) { return matchFixedDigits(body, 5) }

@@ -108,6 +108,9 @@ func TestValidateChecksum(t *testing.T) {
 		// La Poste. Note the SIREN itself is Luhn-valid; only some La Poste
 		// SIRETs need the divisible-by-5 exception (see providers/siret).
 		{name: "known-valid-la-poste", value: "356000000", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		// Économat des Armées SIREN (from annuaire-entreprises.data.gouv.fr).
+		// Historically cited as dérogatoire but its SIREN passes Luhn.
+		{name: "known-valid-economat-armees", value: "542085907", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 
 		{name: "known-invalid", value: "732829321", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidChecksum},
 		{name: "known-invalid-lvmh-off-by-one", value: "552100555", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidChecksum},

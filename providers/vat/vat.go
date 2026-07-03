@@ -90,8 +90,28 @@ func (Provider) Canonicalize(input businessid.IdentifierInput) businessid.Identi
 		value = "EL" + value[2:]
 	}
 
+	// The UK's ISO code is "GB" but many legacy systems emit "UK". Alias
+	// UK → GB symmetrically. XI (Northern Ireland) is kept as-is because
+	// it is a distinct VIES prefix.
+	if cc == "UK" {
+		cc = "GB"
+	}
+
+	if len(value) >= 2 && value[:2] == "UK" {
+		value = "GB" + value[2:]
+	}
+
 	if value != "" && !businessid.IsASCIICountryPrefix(value) && cc != "" {
 		value = cc + value
+	}
+
+	// BE pre-2005 VAT numbers were 9 digits. In 2005 SPF Finances
+	// prepended a "0" to bring every VAT to 10 digits. Emitting the
+	// 9-digit form is still common in legacy databases; canonicalize
+	// by re-adding the leading zero when the BE body would otherwise
+	// fail the length check.
+	if len(value) == 11 && value[:2] == "BE" {
+		value = "BE0" + value[2:]
 	}
 
 	input.Value = value
