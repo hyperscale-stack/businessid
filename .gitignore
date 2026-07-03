@@ -8,3 +8,5 @@ build/
 mock_*
 
 .claude/
+
+/hack/derive-corpus/derive-corpus
