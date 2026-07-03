@@ -31,7 +31,10 @@ build:
 .PHONY: generate
 generate:
 	@echo "Generating mocks..."
-	@go generate ./...
+	@for mod in $(MODULES); do \
+		echo "==> generate $$mod"; \
+		(cd "$$mod" && go generate ./...) || exit 1; \
+	done
 
 
 $(BUILD_DIR)/coverage.out: _build
