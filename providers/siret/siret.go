@@ -5,8 +5,14 @@
 // Package siret validates the French SIRET establishment identifier.
 //
 // A SIRET is exactly 14 digits (SIREN + 5-digit NIC) and normally validates
-// against the Luhn (mod-10) checksum. The La Poste exception (SIREN 356000000)
-// is not handled in V1 and returns invalid checksum.
+// against the Luhn (mod-10) checksum. The NIC 00000 is reserved by INSEE
+// and never attributed, so it is rejected at the format level.
+//
+// Establishments of La Poste (SIREN 356000000) may instead satisfy INSEE's
+// dérogatoire rule where the plain sum of the 14 digits is divisible by 5;
+// this validator accepts a La Poste SIRET when either check passes.
+// Additional non-Luhn rules for other historical SIRENs can be registered
+// via [WithDerogation].
 package siret
 
 import (
@@ -16,15 +22,47 @@ import (
 )
 
 const (
-	length   = 14
-	msgEmpty = "empty value"
+	length      = 14
+	sirenLength = 9
+	reservedNIC = "00000"
+	msgEmpty    = "empty value"
 )
 
-// Provider validates SIRET numbers.
-type Provider struct{}
+// DerogationRule reports whether a canonical (digit-only) SIRET satisfies a
+// non-Luhn national rule. It is only consulted when Luhn itself fails.
+type DerogationRule func(canonical string) bool
 
-// New returns a new SIRET provider.
-func New() *Provider { return &Provider{} }
+// Option configures a Provider at construction time.
+type Option func(*Provider)
+
+// WithDerogation registers a non-Luhn rule for SIRETs whose 9-digit SIREN
+// prefix matches the given value. When Luhn fails, the registered rule is
+// consulted. Multiple calls compose; the last one wins for a given prefix.
+func WithDerogation(siren string, rule DerogationRule) Option {
+	return func(p *Provider) {
+		if p.derogations == nil {
+			p.derogations = map[string]DerogationRule{}
+		}
+
+		p.derogations[siren] = rule
+	}
+}
+
+// Provider validates SIRET numbers.
+type Provider struct {
+	derogations map[string]DerogationRule
+}
+
+// New returns a new SIRET provider. See [Option] for available options.
+func New(opts ...Option) *Provider {
+	p := &Provider{derogations: knownSIRETDerogations()}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p
+}
 
 // Kind implements [businessid.Provider].
 func (Provider) Kind() businessid.IdentifierKind { return businessid.IdentifierKindSIRET }
@@ -75,6 +113,14 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 		return res, nil
 	}
 
+	if input.Value[sirenLength:] == reservedNIC {
+		res.Status = businessid.ValidationStatusInvalid
+		res.ReasonCode = businessid.ReasonInvalidFormat
+		res.Message = "SIRET NIC 00000 is reserved by INSEE"
+
+		return res, nil
+	}
+
 	res.Status = businessid.ValidationStatusValid
 	res.ReasonCode = businessid.ReasonOK
 
@@ -82,7 +128,7 @@ func (Provider) ValidateFormat(_ context.Context, input businessid.IdentifierInp
 }
 
 // ValidateChecksum implements [businessid.ChecksumValidator].
-func (Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
+func (p Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierInput) (*businessid.ValidationResult, error) {
 	res := &businessid.ValidationResult{
 		Kind:           businessid.IdentifierKindSIRET,
 		Level:          businessid.ValidationLevelChecksum,
@@ -98,10 +144,10 @@ func (Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierI
 		return res, nil
 	}
 
-	if !businessid.Luhn(input.Value) {
+	if !p.isValidChecksum(input.Value) {
 		res.Status = businessid.ValidationStatusInvalid
 		res.ReasonCode = businessid.ReasonInvalidChecksum
-		res.Message = "SIRET Luhn check failed"
+		res.Message = "SIRET checksum failed"
 
 		return res, nil
 	}
@@ -110,4 +156,35 @@ func (Provider) ValidateChecksum(_ context.Context, input businessid.IdentifierI
 	res.ReasonCode = businessid.ReasonOK
 
 	return res, nil
+}
+
+// isValidChecksum accepts a SIRET whose 14-digit body satisfies Luhn, or a
+// registered dérogation rule for the matching SIREN prefix. Callers must
+// have already verified length and digit-only shape.
+func (p Provider) isValidChecksum(s string) bool {
+	if businessid.Luhn(s) {
+		return true
+	}
+
+	if len(s) < sirenLength {
+		return false
+	}
+
+	if rule, ok := p.derogations[s[:sirenLength]]; ok {
+		return rule(s)
+	}
+
+	return false
+}
+
+// digitSum returns the arithmetic sum of the ASCII digits in s. The caller
+// must ensure every byte is '0'..'9'.
+func digitSum(s string) int {
+	n := 0
+
+	for i := range len(s) {
+		n += int(s[i] - '0')
+	}
+
+	return n
 }

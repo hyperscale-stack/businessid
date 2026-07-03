@@ -116,9 +116,11 @@ func IsAlnumUpper(s string) bool {
 }
 
 // IsRegistrationCharset reports whether s is non-empty and contains only
-// characters from the set A-Z, 0-9, dot, slash, dash and space — the
+// characters from the set A-Z, 0-9, dot, slash, dash, space and plus — the
 // character class shared by EUID registration segments and generic
-// national registration numbers.
+// national registration numbers. The plus sign is accepted because some
+// national registers (e.g. legacy Irish, some Nordic registrations) emit
+// it as part of the local identifier.
 func IsRegistrationCharset(s string) bool {
 	if s == "" {
 		return false
@@ -130,7 +132,7 @@ func IsRegistrationCharset(s string) bool {
 		switch {
 		case c >= '0' && c <= '9',
 			c >= 'A' && c <= 'Z',
-			c == '.', c == '/', c == '-', c == ' ':
+			c == '.', c == '/', c == '-', c == ' ', c == '+':
 			continue
 		default:
 			return false

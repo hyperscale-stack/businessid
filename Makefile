@@ -72,6 +72,13 @@ bench:
 		(cd "$$mod" && go test -bench=. -benchmem -benchtime=5s -timeout 300s ./...) || exit 1; \
 	done
 
+.PHONY: fuzz
+fuzz:
+	@for pkg in providers/vat providers/siren providers/siret providers/euid; do \
+		echo "==> fuzz $$pkg"; \
+		go test -fuzz=FuzzValidateFormat -fuzztime=$${FUZZTIME:-30s} ./$$pkg/... || exit 1; \
+	done
+
 .PHONY: lint
 lint:
 ifeq (, $(shell which golangci-lint))
