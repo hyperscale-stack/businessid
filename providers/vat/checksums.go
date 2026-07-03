@@ -427,11 +427,11 @@ func cifCheck(body string) bool {
 	case 'P', 'Q', 'R', 'S', 'W':
 		return last == letterCheck
 	default:
-		// Strict rule for C, D, F, G, J, L, M, N, U, V: domestic entities
-		// use the digit check. Foreign CIFs (rare) that use the letter
-		// form are out of scope; callers who need to accept them can
-		// wire a custom rule.
-		return last == digitCheck
+		// Either group (C, D, F, G, J, L, M, N, U, V): the tax authority
+		// accepts both the digit and the letter check. N-prefix (foreign
+		// entities like ArcelorMittal N0181056C) commonly use the letter
+		// form; domestic C/D/F/G/J/L/M/U/V typically use the digit form.
+		return last == digitCheck || last == letterCheck
 	}
 }
 

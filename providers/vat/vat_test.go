@@ -568,6 +568,15 @@ func TestValidateChecksumPerCountry(t *testing.T) {
 		{name: "es-valid-cif-p", value: "ESP1234567D", wantStatus: businessid.ValidationStatusValid},
 		{name: "es-cif-unknown-first", value: "ES!12345678", wantStatus: businessid.ValidationStatusInvalid},
 
+		// CIF N-type (foreign entity — ArcelorMittal N0181056C).
+		// Foreign entities issue CIFs that end in a letter check even
+		// though N falls in the "either" group per the tax authority
+		// tables. See providers/vat/checksums.go cifCheck() default arm.
+		{name: "es-valid-cif-n-foreign", value: "ESN0181056C", wantStatus: businessid.ValidationStatusValid},
+		// CIF J-type kept as-is (already an "either" group entry): the
+		// digit-form check still validates.
+		{name: "es-valid-cif-j-either", value: "ESJ12345674", wantStatus: businessid.ValidationStatusValid},
+
 		// BG BULSTAT alt-weights path (sum1 % 11 == 10).
 		{name: "bg-valid-bulstat-alt", value: "BG050000009", wantStatus: businessid.ValidationStatusValid},
 		{name: "bg-invalid-foreigner", value: "BG7000000000", wantStatus: businessid.ValidationStatusInvalid},
