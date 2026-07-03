@@ -75,9 +75,13 @@ bench:
 .PHONY: fuzz
 fuzz:
 	@for pkg in providers/vat providers/siren providers/siret providers/euid; do \
-		echo "==> fuzz $$pkg"; \
-		go test -fuzz=FuzzValidateFormat -fuzztime=$${FUZZTIME:-30s} ./$$pkg/... || exit 1; \
+		echo "==> fuzz $$pkg (FUZZTIME=$${FUZZTIME:-5m})"; \
+		go test -fuzz=FuzzValidateFormat -fuzztime=$${FUZZTIME:-5m} ./$$pkg/... || exit 1; \
 	done
+
+.PHONY: fuzz-quick
+fuzz-quick:
+	@$(MAKE) fuzz FUZZTIME=30s
 
 .PHONY: lint
 lint:

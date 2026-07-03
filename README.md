@@ -75,36 +75,71 @@ must match, otherwise the result is `ReasonInvalidLength` or
 | United Kingdom       | GB   | 9 or 12 digits                      |
 | Northern Ireland     | XI   | Same as GB (post-Brexit protocol)   |
 | Norway               | NO   | 9 digits (org. number)              |
-| Iceland              | IS   | 5 or 6 digits                       |
+| Iceland              | IS   | 5, 6, or 10 (kennitala) digits      |
 | Liechtenstein        | LI   | 5 digits                            |
 
-Checksum validation (`ValidateChecksum`) is implemented for **28 codes**:
-EU-27 + `XI` and `GB` (post-Brexit). Each algorithm is sourced from the
-national tax authority documentation and cross-verified against
-`python-stdnum` test vectors. `NO`, `IS`, `LI` remain format-only (no
-published algorithm we could verify). See
+Checksum validation (`ValidateChecksum`) is implemented for **30 codes**:
+EU-27 + `XI`, `GB`, `NO`, and `IS` (kennitala 10-digit form only). Each
+algorithm is sourced from the national tax authority documentation and
+cross-verified against `python-stdnum` test vectors. `LI` remains
+format-only (no published algorithm). See
 [providers/vat/checksums.go](providers/vat/checksums.go) for per-country
-source references.
+source references. Coverage per country includes multi-variant support:
+`BG` (BULSTAT 9d, EGN 10d, foreigner LNCh 10d), `CZ` (legal 8d + 9d + rodné
+číslo 10d), `LV` (legal entity + natural person personal code).
 
-**Aliases**: `GR` (ISO Greek code) is canonicalized to `EL` (official VAT
-prefix). `IE` legacy VAT numbers containing `+` or `*` in position 2 are
-accepted with the `vat.WithLegacy()` option.
+**Aliases**: `GR` → `EL` and `UK` → `GB` are canonicalized. `IE` legacy
+VAT numbers containing `+` or `*` in position 2 are accepted with the
+`vat.WithLegacy()` option. `BE` pre-2005 9-digit VAT numbers are
+automatically canonicalized to their post-2005 10-digit form.
 
-### EUID (meta-format)
+**Reserved prefixes**: `CY12…` is rejected as it is reserved for legacy
+Cypriot TINs, not VAT.
+
+### EUID (meta-format, native validators for EU-27)
 
 `ValidateFormat` enforces the BRIS layout
-`<CC><REGISTER>.<REGISTRATION>` (Regulation (EU) 2015/884) for the EU-27.
-The register segment is 1–20 upper-case alphanumeric characters; the
-registration segment is 1–64 characters from `[A-Z0-9./\- +]`.
+`<CC><REGISTER>.<REGISTRATION>` (Regulation (EU) 2015/884). The register
+segment is 1–20 upper-case alphanumeric characters; the registration
+segment is 1–64 characters from `[A-Z0-9./\- +]`.
 
-**Meta-format delegation**: the country code selects a national
-sub-validator (injected via `euid.WithSubValidator`) which validates the
-REGISTRATION segment against its own rules. Today `FR` delegates to the
-SIREN provider (registration must be a 9-digit Luhn-valid SIREN); other
-countries can be wired the same way as national providers get added.
-`defaults.New()` wires the SIREN sub-validator automatically.
+**Native register validators for all EU-27**: no external wiring
+required. `euid.New()` alone validates the REGISTRATION segment against
+the national register's format (and checksum where documented):
 
-`ValidateChecksum` follows the same delegation pattern.
+| Country | Register | Format | Checksum |
+|---------|----------|--------|:--------:|
+| AT | Firmenbuchnummer (FN) | 1-6 digits + 1 letter | — |
+| BE | KBO/BCE | 10 digits | ✓ (mod-97) |
+| BG | EIK | 9 or 13 digits | ✓ (BULSTAT) |
+| HR | MBS | 8 digits | — |
+| CY | HE number | 6 digits | — |
+| CZ | IČO | 8 digits | ✓ (mod-11) |
+| DE | Handelsregister | free-form (court/type/number) | — |
+| DK | CVR | 8 digits | ✓ (mod-11) |
+| EE | Registrikood | 8 digits | ✓ (mod-11) |
+| EL | GEMI | 12 digits | — |
+| ES | NIF/CIF | alnum + 7 digits + alnum | ✓ (DNI/NIE/CIF) |
+| FI | Y-tunnus | 8 digits | ✓ (mod-11) |
+| FR | SIREN | 9 digits | ✓ (Luhn) |
+| HU | Cégjegyzékszám | 10 digits (with optional dashes) | — |
+| IE | CRO number | 5-7 digits | — |
+| IT | Codice Fiscale entità | 11 digits | ✓ (Luhn) |
+| LT | Juridinio asmens kodas | 9 digits | ✓ (mod-11) |
+| LU | RCSL | B + 4-6 digits | — |
+| LV | Reģistrācijas numurs | 11 digits | ✓ (mod-11) |
+| MT | Company number | C + 4-6 digits | — |
+| NL | KVK | 8 digits | ✓ (mod-11) |
+| PL | KRS | 10 digits | — |
+| PT | NIPC | 9 digits | ✓ (mod-11) |
+| RO | CUI | 2-10 digits | ✓ (mod-11) |
+| SE | Organisationsnummer | 10 digits | ✓ (Luhn) |
+| SI | Matična številka | 7 digits | — |
+| SK | IČO | 8 digits | ✓ (mod-11) |
+
+Non-BRIS prefixes (XI, GB, NO, IS, LI) are accepted for meta-format
+shape only; use `euid.WithCountryValidator(cc, validator)` to inject a
+custom validator for extension.
 
 ### SIREN / SIRET
 
@@ -124,9 +159,9 @@ All four providers (`vat`, `siren`, `siret`, `euid`) accept functional
 options at construction:
 
 ```go
-v := vat.New(vat.WithLegacy())                  // accept IE +/* legacy chars
+v := vat.New(vat.WithLegacy())                             // accept IE +/* legacy chars
 s := siret.New(siret.WithDerogation("999999999", myRule))  // custom rule
-e := euid.New(euid.WithSubValidator(siren.New()))          // wire SIREN sub-validator
+e := euid.New(euid.WithCountryValidator("XI", myValidator)) // custom register validator
 ```
 
 ## Install

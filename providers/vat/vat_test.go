@@ -262,16 +262,29 @@ func TestValidateFormat(t *testing.T) {
 		{name: "xi-valid-12", value: "XI123456789012", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "xi-invalid-length", value: "XI12345678", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
 
+		// UK (ISO code) aliased to GB in canonicalize.
+		{name: "uk-alias-value", value: "UK123456789", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		{name: "uk-alias-cc", value: "123456789", countryCode: "UK", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+
+		// BE 9-digit legacy: pre-2005 VAT numbers were 9 digits; SPF
+		// Finances prepended "0" in 2005. Canonicalize handles the
+		// legacy form transparently.
+		{name: "be-legacy-9d", value: "BE417497106", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+
+		// CY "12" prefix reserved for legacy TINs (not VAT).
+		{name: "cy-invalid-12-prefix", value: "CY12345678A", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidFormat},
+
 		// NO — Norway: 9-digit organization number.
 		// Source: Skatteetaten (skatteetaten.no) foretaksregisteret.
 		{name: "no-valid", value: "NO923609016", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "no-invalid-length", value: "NO92360901", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
 		{name: "no-invalid-chars", value: "NO92360901A", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
 
-		// IS — Iceland: 5 or 6 digits (VSK number).
-		// Source: skatturinn.is registration guide.
+		// IS — Iceland: 5 or 6 digits (VSK), or 10 digits (kennitala).
+		// Source: skatturinn.is + Þjóðskrá.
 		{name: "is-valid-5", value: "IS12345", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "is-valid-6", value: "IS123456", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
+		{name: "is-valid-10-kennitala", value: "IS0102030079", wantStatus: businessid.ValidationStatusValid, wantReason: businessid.ReasonOK},
 		{name: "is-invalid-length", value: "IS1234", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidLength},
 		{name: "is-invalid-chars", value: "IS1234A", wantStatus: businessid.ValidationStatusInvalid, wantReason: businessid.ReasonInvalidCharacters},
 
@@ -511,6 +524,32 @@ func TestValidateChecksumPerCountry(t *testing.T) {
 		// XI — Same algorithms as GB.
 		{name: "xi-valid", value: "XI562235987", wantStatus: businessid.ValidationStatusValid},
 		{name: "xi-invalid", value: "XI562235980", wantStatus: businessid.ValidationStatusInvalid},
+
+		// NO — Source: Brønnøysundregistrene (Equinor 923609016).
+		{name: "no-valid", value: "NO923609016", wantStatus: businessid.ValidationStatusValid},
+		{name: "no-invalid", value: "NO923609010", wantStatus: businessid.ValidationStatusInvalid},
+
+		// IS — 10-digit kennitala (constructed valid vector for 01/02/2003).
+		{name: "is-valid-kennitala", value: "IS0102030079", wantStatus: businessid.ValidationStatusValid},
+		{name: "is-vsk-unsupported-checksum", value: "IS12345", wantStatus: businessid.ValidationStatusInvalid},
+
+		// LV — natural person path (personal code).
+		{name: "lv-valid-natural", value: "LV01010120001", wantStatus: businessid.ValidationStatusValid},
+
+		// CZ — 9-digit special (starts with '6') and 10-digit rodné číslo.
+		{name: "cz-valid-9d", value: "CZ630000001", wantStatus: businessid.ValidationStatusValid},
+		{name: "cz-valid-10d-rodne", value: "CZ8001010006", wantStatus: businessid.ValidationStatusValid},
+		{name: "cz-invalid-9d", value: "CZ630000000", wantStatus: businessid.ValidationStatusInvalid},
+
+		// BG — vectors for each variant.
+		{name: "bg-valid-egn-10d", value: "BG7523169263", wantStatus: businessid.ValidationStatusValid},
+		{name: "bg-invalid-egn", value: "BG7523169260", wantStatus: businessid.ValidationStatusInvalid},
+
+		// IT — Ferrari real Codice Fiscale (verified Luhn on 00159820174).
+		{name: "it-valid-ferrari", value: "IT00159820174", wantStatus: businessid.ValidationStatusValid},
+
+		// AT — additional verified vector (constructed to pass mod-10).
+		{name: "at-valid-3", value: "ATU30525107", wantStatus: businessid.ValidationStatusValid},
 	}
 
 	for _, tc := range cases {

@@ -159,18 +159,28 @@ func checksumCYBody(body string) bool {
 	return byte('A'+sum%26) == body[8]
 }
 
-// checksumCZBody validates CZ. Handled: 8-digit legal entity only.
-// Weights 8-7-6-5-4-3-2 on first 7 digits; check = 11 - sum mod 11,
-// then mapped: {0,10 → invalid ; 1 → 0 ; else stay}.
-// Source: GFR Czech Republic (financnisprava.cz) DIČ.
-// 9- and 10-digit variants (rodné číslo) not implemented — those cover
-// natural persons whose VAT number is their birth-number, out of scope
-// for a business identifier library.
+// checksumCZBody validates CZ VAT. Three variants:
+//   - 8 digits: legal entity, weights 8-7-6-5-4-3-2 mod 11
+//   - 9 digits: special legal entity (starts with 6), same weights on
+//     digits[1..7] plus 8 adjustment
+//   - 10 digits: rodné číslo (natural person birth number), the whole
+//     value must be divisible by 11 and the encoded date must be plausible.
+//
+// Source: GFR Czech Republic (financnisprava.cz) + python-stdnum stdnum.cz.dic.
 func checksumCZBody(body string) bool {
-	if len(body) != 8 {
-		return false
+	switch len(body) {
+	case 8:
+		return checksumCZLegal8(body)
+	case 9:
+		return checksumCZLegal9(body)
+	case 10:
+		return checksumCZRodne10(body)
 	}
 
+	return false
+}
+
+func checksumCZLegal8(body string) bool {
 	weights := [7]int{8, 7, 6, 5, 4, 3, 2}
 	sum := 0
 
@@ -188,12 +198,75 @@ func checksumCZBody(body string) bool {
 	case 1:
 		check = 0
 	case 10:
-		check = 1 // 11-10=1
+		check = 1
 	default:
 		check = 11 - r
 	}
 
 	return check == int(body[7]-'0')
+}
+
+// checksumCZLegal9 handles the 9-digit CZ VAT layout where the first
+// character must be '6', and the checksum on digits[1..7] is computed
+// with a +8 adjustment before mod-11.
+func checksumCZLegal9(body string) bool {
+	if body[0] != '6' {
+		return false
+	}
+
+	weights := [7]int{8, 7, 6, 5, 4, 3, 2}
+	sum := 8
+
+	for i := 1; i <= 7; i++ {
+		sum += int(body[i]-'0') * weights[i-1]
+	}
+
+	r := sum % 11
+
+	var check int
+
+	switch r {
+	case 0:
+		check = 1
+	case 1:
+		check = 0
+	case 10:
+		check = 1
+	default:
+		check = 11 - r
+	}
+
+	return check == int(body[8]-'0')
+}
+
+// checksumCZRodne10 verifies a 10-digit rodné číslo: the number as an
+// integer must be divisible by 11, and the DDMMYY prefix must decode to
+// a plausible date (day 01-31, month 01-12 or 51-62 for women or 21-32
+// / 71-82 depending on year).
+func checksumCZRodne10(body string) bool {
+	r := 0
+	for i := range 10 {
+		r = (r*10 + int(body[i]-'0')) % 11
+	}
+
+	if r != 0 {
+		return false
+	}
+
+	day := int(body[4]-'0')*10 + int(body[5]-'0')
+	monthRaw := int(body[2]-'0')*10 + int(body[3]-'0')
+
+	month := monthRaw
+	switch {
+	case monthRaw >= 51 && monthRaw <= 62:
+		month = monthRaw - 50
+	case monthRaw >= 21 && monthRaw <= 32:
+		month = monthRaw - 20
+	case monthRaw >= 71 && monthRaw <= 82:
+		month = monthRaw - 70
+	}
+
+	return day >= 1 && day <= 31 && month >= 1 && month <= 12
 }
 
 // checksumDEBody validates DE: 9 digits, ISO 7064 MOD 11,10 iterative.
@@ -354,7 +427,11 @@ func cifCheck(body string) bool {
 	case 'P', 'Q', 'R', 'S', 'W':
 		return last == letterCheck
 	default:
-		return last == digitCheck || last == letterCheck
+		// Strict rule for C, D, F, G, J, L, M, N, U, V: domestic entities
+		// use the digit check. Foreign CIFs (rare) that use the letter
+		// form are out of scope; callers who need to accept them can
+		// wire a custom rule.
+		return last == digitCheck
 	}
 }
 
@@ -500,15 +577,20 @@ func checksumLUBody(body string) bool {
 // checksumLVBody validates LV. Two variants:
 //   - Legal entity (first digit > 3): weights 9-1-4-8-3-10-2-5-7-6 on
 //     first 10; check = (3 - S mod 11) mod 11; reject if 10.
-//   - Natural person (first digit ≤ 3): birth-date encoded number.
-//     Only legal entity path is implemented; natural persons return false.
+//   - Natural person (first digit ≤ 3): personal code with DDMMYY encoding.
+//     weights 10-5-8-4-2-1-6-3-7-9; check = (1101 - S) mod 11 mod 10.
 //
-// Source: VID Latvia (vid.gov.lv) — PVN reģistrācijas numurs.
+// Source: VID Latvia (vid.gov.lv) — PVN reģistrācijas numurs +
+// python-stdnum stdnum.lv.pvn.
 func checksumLVBody(body string) bool {
-	if body[0] <= '3' {
-		return false
+	if body[0] > '3' {
+		return checksumLVLegal(body)
 	}
 
+	return checksumLVNatural(body)
+}
+
+func checksumLVLegal(body string) bool {
 	weights := [10]int{9, 1, 4, 8, 3, 10, 2, 5, 7, 6}
 	sum := 0
 
@@ -522,6 +604,19 @@ func checksumLVBody(body string) bool {
 	if check == 10 {
 		return false
 	}
+
+	return check == int(body[10]-'0')
+}
+
+func checksumLVNatural(body string) bool {
+	weights := [10]int{10, 5, 8, 4, 2, 1, 6, 3, 7, 9}
+	sum := 0
+
+	for i := range 10 {
+		sum += int(body[i]-'0') * weights[i]
+	}
+
+	check := (1101 - sum) % 11 % 10
 
 	return check == int(body[10]-'0')
 }
@@ -696,6 +791,63 @@ func checksumGBBody(body string) bool {
 	}
 
 	return false
+}
+
+// checksumNOBody validates NO organization number: 9 digits, weighted
+// mod 11. Source: Brønnøysundregistrene (brreg.no).
+func checksumNOBody(body string) bool {
+	weights := [8]int{3, 2, 7, 6, 5, 4, 3, 2}
+	sum := 0
+
+	for i := range 8 {
+		sum += int(body[i]-'0') * weights[i]
+	}
+
+	r := sum % 11
+	if r == 1 {
+		return false // invalid check would be 10
+	}
+
+	check := 0
+	if r > 0 {
+		check = 11 - r
+	}
+
+	return check == int(body[8]-'0')
+}
+
+// checksumISBody validates IS kennitala when the VAT input is 10 digits
+// (personal or entity code). For the 5-6 digit VSK number no publicly
+// documented algorithm exists — those cases return false at this layer
+// (the format branch has already validated shape).
+//
+// Kennitala algorithm: weights 3-2-7-6-5-4-3-2 on first 8 digits,
+// check at position 8 = 11 - (S mod 11); position 9 encodes century
+// (0=2000s, 8=1800s, 9=1900s).
+// Source: Skatturinn (skatturinn.is) + Þjóðskrá.
+func checksumISBody(body string) bool {
+	if len(body) != 10 {
+		return false
+	}
+
+	weights := [8]int{3, 2, 7, 6, 5, 4, 3, 2}
+	sum := 0
+
+	for i := range 8 {
+		sum += int(body[i]-'0') * weights[i]
+	}
+
+	r := sum % 11
+	if r == 1 {
+		return false
+	}
+
+	check := 0
+	if r > 0 {
+		check = 11 - r
+	}
+
+	return check == int(body[8]-'0')
 }
 
 func gbAlgo(nine string, use9755 bool) bool {
